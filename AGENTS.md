@@ -1,6 +1,6 @@
-## PixQL
+## XDB
 
-PixQL is a local web database client for PostgreSQL, MySQL, and SQLite. It is a pnpm workspace.
+XDB is a local web database client for PostgreSQL, MySQL, and SQLite. It is a pnpm workspace.
 
 ### Project Layout
 
@@ -25,6 +25,6 @@ Use pnpm for installs, scripts, and tests. Prefer root scripts unless a task is 
 ### Development Notes
 
 * Keep all database access in the local server (`apps/web/src/server`, shared services under `src/main`).
-* The renderer only talks to the server through the typed fetch bridge (`src/renderer/lib/pixql-client.ts`); never call services from UI code.
-* State (connections, history, saved queries, settings) is persisted as JSON in the data directory (`PIXQL_DATA_DIR`, default `~/.pixql`).
+* The renderer only talks to the server through the typed fetch bridge (`src/renderer/lib/xdb-client.ts`); never call services from UI code.
+* State (connections, history, saved queries, settings) is persisted as JSON in the data directory (`XDB_DATA_DIR`, default `~/.xdb`).
 * Keep changes scoped to the relevant app and run the narrowest useful check before handing off.

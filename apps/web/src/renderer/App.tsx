@@ -199,8 +199,8 @@ const DEFAULT_OBJECTS_SIDEBAR_WIDTH = 252;
 const MIN_OBJECTS_SIDEBAR_WIDTH = 216;
 const MAX_OBJECTS_SIDEBAR_WIDTH = 360;
 const EMPTY_DRAFT_ROW: Record<string, unknown> = Object.freeze({});
-const OBJECTS_COLLAPSED_STORAGE_KEY = "pixql:layout:objects-collapsed";
-const OBJECTS_SIDEBAR_WIDTH_STORAGE_KEY = "pixql:layout:objects-sidebar-width";
+const OBJECTS_COLLAPSED_STORAGE_KEY = "xdb:layout:objects-collapsed";
+const OBJECTS_SIDEBAR_WIDTH_STORAGE_KEY = "xdb:layout:objects-sidebar-width";
 const SIDEBAR_TOGGLE_KEY = "b";
 const DEFAULT_APP_SETTINGS: AppSettings = { theme: "system" };
 const COPY_ROW_FORMATS: { format: ClipboardRowFormat; label: string }[] = [
@@ -732,7 +732,7 @@ export function App(): ReactElement {
   }, []);
 
   useEffect(() => {
-    return window.pixql.onBackupProgress((progress: DatabaseBackupProgress) => {
+    return window.xdb.onBackupProgress((progress: DatabaseBackupProgress) => {
       const toastId = backupToastIds.current.get(progress.taskId);
       if (!toastId) {
         return;
@@ -762,7 +762,7 @@ export function App(): ReactElement {
         action: {
           label: "Cancel",
           onClick: () => {
-            void window.pixql.cancelBackup(progress.taskId);
+            void window.xdb.cancelBackup(progress.taskId);
           }
         }
       });
@@ -770,7 +770,7 @@ export function App(): ReactElement {
   }, []);
 
   useEffect(() => {
-    return window.pixql.onRestoreProgress((progress: DatabaseRestoreProgress) => {
+    return window.xdb.onRestoreProgress((progress: DatabaseRestoreProgress) => {
       const toastId = restoreToastIds.current.get(progress.taskId);
       if (!toastId) {
         return;
@@ -800,7 +800,7 @@ export function App(): ReactElement {
         action: {
           label: "Cancel",
           onClick: () => {
-            void window.pixql.cancelRestore(progress.taskId);
+            void window.xdb.cancelRestore(progress.taskId);
           }
         }
       });
@@ -808,7 +808,7 @@ export function App(): ReactElement {
   }, []);
 
   const loadConnections = useCallback(async () => {
-    const [items, groups] = await Promise.all([window.pixql.listConnections(), window.pixql.listConnectionGroups()]);
+    const [items, groups] = await Promise.all([window.xdb.listConnections(), window.xdb.listConnectionGroups()]);
 
     setProfiles(items);
     setConnectionGroups(groups);
@@ -824,7 +824,7 @@ export function App(): ReactElement {
         return;
       }
 
-      const databaseObjects = await window.pixql.listObjects(profileId);
+      const databaseObjects = await window.xdb.listObjects(profileId);
       setObjects(databaseObjects);
     },
     [selectedProfileId]
@@ -840,7 +840,7 @@ export function App(): ReactElement {
         return;
       }
 
-      const result = await window.pixql.listStorageObjects({
+      const result = await window.xdb.listStorageObjects({
         profileId,
         prefix,
         continuationToken: continuationToken ?? undefined,
@@ -858,7 +858,7 @@ export function App(): ReactElement {
 
   const loadHistory = useCallback(
     async (profileId = selectedProfileId) => {
-      const items = await window.pixql.getHistory(profileId || undefined);
+      const items = await window.xdb.getHistory(profileId || undefined);
       setHistory(items);
     },
     [selectedProfileId]
@@ -873,7 +873,7 @@ export function App(): ReactElement {
         return;
       }
 
-      const queries = await window.pixql.listSavedQueries(profileId);
+      const queries = await window.xdb.listSavedQueries(profileId);
       setSavedQueries(queries);
       setActiveSavedQueryId((current) => (current && queries.some((query) => query.id === current) ? current : null));
     },
@@ -881,7 +881,7 @@ export function App(): ReactElement {
   );
 
   const loadSqlDraft = useCallback(async (profileId: string, engine: DatabaseEngine): Promise<string> => {
-    const draft = await window.pixql.getSqlDraft(profileId);
+    const draft = await window.xdb.getSqlDraft(profileId);
     return draft?.sql || defaultSqlForEngine(engine);
   }, []);
 
@@ -891,7 +891,7 @@ export function App(): ReactElement {
     }
 
     sqlDraftSaveTimeout.current = setTimeout(() => {
-      void window.pixql.saveSqlDraft(profileId, sql);
+      void window.xdb.saveSqlDraft(profileId, sql);
       sqlDraftSaveTimeout.current = null;
     }, SQL_DRAFT_SAVE_DELAY_MS);
   }, []);
@@ -914,7 +914,7 @@ export function App(): ReactElement {
   );
 
   const loadSettings = useCallback(async () => {
-    setAppSettings(await window.pixql.getSettings());
+    setAppSettings(await window.xdb.getSettings());
   }, []);
 
   const saveThemePreference = useCallback(
@@ -922,7 +922,7 @@ export function App(): ReactElement {
       setAppSettings((current) => ({ ...current, theme }));
 
       try {
-        const nextSettings = await window.pixql.saveSettings({ theme });
+        const nextSettings = await window.xdb.saveSettings({ theme });
         setAppSettings(nextSettings);
       } catch (settingsError) {
         toast.error("Settings could not be saved", {
@@ -950,7 +950,7 @@ export function App(): ReactElement {
       }
 
       const [data, nextStructure] = await Promise.all([
-        window.pixql.getTableData(
+        window.xdb.getTableData(
           selectedProfileId,
           targetTab.object.schema,
           targetTab.object.name,
@@ -959,7 +959,7 @@ export function App(): ReactElement {
           targetFilters,
           targetSort
         ),
-        window.pixql.getTableStructure(selectedProfileId, targetTab.object.schema, targetTab.object.name)
+        window.xdb.getTableStructure(selectedProfileId, targetTab.object.schema, targetTab.object.name)
       ]);
 
       updateObjectTab(targetTab.id, (tab) => ({
@@ -1130,9 +1130,9 @@ export function App(): ReactElement {
 
   const saveProfile = async (input: ConnectionInput): Promise<void> => {
     await runTask(async () => {
-      const saved = await window.pixql.saveConnection(input);
+      const saved = await window.xdb.saveConnection(input);
       if (connected && input.id === selectedProfileId) {
-        await window.pixql.disconnect(input.id);
+        await window.xdb.disconnect(input.id);
         clearConnectedState();
       }
       await loadConnections();
@@ -1143,14 +1143,14 @@ export function App(): ReactElement {
   };
 
   const testConnection = async (input: ConnectionInput): Promise<ConnectionTestResult> => {
-    const result = await window.pixql.testConnection(input);
+    const result = await window.xdb.testConnection(input);
     await loadConnections();
     return result;
   };
 
   const saveConnectionGroup = async (input: ConnectionGroupInput): Promise<void> => {
     await runTask(async () => {
-      await window.pixql.saveConnectionGroup(input);
+      await window.xdb.saveConnectionGroup(input);
       await loadConnections();
       setGroupModalOpen(false);
       setGroupModalInitial(null);
@@ -1159,7 +1159,7 @@ export function App(): ReactElement {
 
   const deleteConnectionGroup = async (groupId: string): Promise<void> => {
     await runTask(async () => {
-      await window.pixql.deleteConnectionGroup(groupId);
+      await window.xdb.deleteConnectionGroup(groupId);
       await loadConnections();
     });
   };
@@ -1187,7 +1187,7 @@ export function App(): ReactElement {
 
     await runTask(async () => {
       setSelectedProfileId(profileId);
-      const fullProfile = await window.pixql.getConnection(profileId);
+      const fullProfile = await window.xdb.getConnection(profileId);
       setModalInitial(fullProfile ?? profile);
       setModalOpen(true);
     });
@@ -1245,12 +1245,12 @@ export function App(): ReactElement {
 
     await runTask(async () => {
       if (status?.connected && status.profileId !== profileId) {
-        await window.pixql.disconnect(status.profileId);
+        await window.xdb.disconnect(status.profileId);
         clearConnectedState();
       }
 
       const inlinePassword = profileId === selectedProfileId ? password || undefined : undefined;
-      const nextStatus = await window.pixql.connect(profileId, inlinePassword);
+      const nextStatus = await window.xdb.connect(profileId, inlinePassword);
       setStatus(nextStatus);
       if (nextStatus.connected) {
         setOpenedProfileIds((current) => (current.includes(profileId) ? current : [...current, profileId]));
@@ -1297,7 +1297,7 @@ export function App(): ReactElement {
     };
 
     await runTask(async () => {
-      await window.pixql.disconnect(selectedProfileId);
+      await window.xdb.disconnect(selectedProfileId);
       clearConnectedState();
     });
   };
@@ -1328,7 +1328,7 @@ export function App(): ReactElement {
 
   const deleteProfile = async (profileId: string): Promise<void> => {
     await runTask(async () => {
-      await window.pixql.deleteConnection(profileId);
+      await window.xdb.deleteConnection(profileId);
       await loadConnections();
       if (profileId === selectedProfileId) {
         setSelectedProfileId("");
@@ -1344,7 +1344,7 @@ export function App(): ReactElement {
     }
 
     await runTask(async () => {
-      const fullProfile = await window.pixql.getConnection(profileId);
+      const fullProfile = await window.xdb.getConnection(profileId);
       await writeClipboardText(
         buildConnectionString({
           ...(fullProfile ?? profile),
@@ -1365,10 +1365,10 @@ export function App(): ReactElement {
     }
 
     await runTask(async () => {
-      const fullProfile = await window.pixql.getConnection(profileId);
+      const fullProfile = await window.xdb.getConnection(profileId);
       const source = fullProfile ?? profile;
       const duplicate = duplicateConnectionInput(source, profiles);
-      const saved = await window.pixql.saveConnection(duplicate);
+      const saved = await window.xdb.saveConnection(duplicate);
       await loadConnections();
       setSelectedProfileId(saved.id);
       toast.success("Connection duplicated", {
@@ -1385,7 +1385,7 @@ export function App(): ReactElement {
       if (!(status?.connected && status.profileId === profileId)) {
         await connect(profileId);
       }
-      setDatabaseList(await window.pixql.listDatabases(profileId));
+      setDatabaseList(await window.xdb.listDatabases(profileId));
     });
     setDatabaseListLoading(false);
   };
@@ -1400,8 +1400,8 @@ export function App(): ReactElement {
     setDatabaseListLoading(true);
     const created = await runTask(
       async () => {
-        await window.pixql.createDatabase(profileId, databaseName);
-        setDatabaseList(await window.pixql.listDatabases(profileId));
+        await window.xdb.createDatabase(profileId, databaseName);
+        setDatabaseList(await window.xdb.listDatabases(profileId));
         toast.success("Database created", { description: databaseName });
       },
       { errorToast: { title: "Could not create database" } }
@@ -1415,8 +1415,8 @@ export function App(): ReactElement {
     setDatabaseListLoading(true);
     await runTask(
       async () => {
-        await window.pixql.dropDatabase(profileId, databaseName);
-        setDatabaseList(await window.pixql.listDatabases(profileId));
+        await window.xdb.dropDatabase(profileId, databaseName);
+        setDatabaseList(await window.xdb.listDatabases(profileId));
         toast.success("Database dropped", { description: databaseName });
       },
       { errorToast: { title: "Could not drop database" } }
@@ -1431,14 +1431,14 @@ export function App(): ReactElement {
     }
 
     await runTask(async () => {
-      const fullProfile = await window.pixql.getConnection(profileId);
+      const fullProfile = await window.xdb.getConnection(profileId);
       const source = fullProfile ?? profile;
       const input: ConnectionInput = {
         ...duplicateConnectionInput(source, profiles),
         database: dbName,
         name: nextDuplicateConnectionName(dbName, profiles)
       };
-      const saved = await window.pixql.saveConnection(input);
+      const saved = await window.xdb.saveConnection(input);
       await loadConnections();
       setSelectedProfileId(saved.id);
       toast.success("Connection created", {
@@ -1452,7 +1452,7 @@ export function App(): ReactElement {
     setConnectionPickerOpen(false);
 
     await runTask(async () => {
-      const result = await window.pixql.exportConnections(includeSecrets);
+      const result = await window.xdb.exportConnections(includeSecrets);
       if (!result) {
         return;
       }
@@ -1468,7 +1468,7 @@ export function App(): ReactElement {
     setConnectionPickerOpen(false);
 
     await runTask(async () => {
-      const result = await window.pixql.importConnections();
+      const result = await window.xdb.importConnections();
       if (!result) {
         return;
       }
@@ -1492,14 +1492,14 @@ export function App(): ReactElement {
       action: {
         label: "Cancel",
         onClick: () => {
-          void window.pixql.cancelBackup(taskId);
+          void window.xdb.cancelBackup(taskId);
         }
       }
     });
     backupToastIds.current.set(taskId, toastId);
 
     try {
-      const result = await window.pixql.backupDatabase(profileId, inlinePassword, taskId);
+      const result = await window.xdb.backupDatabase(profileId, inlinePassword, taskId);
       if (result) {
         toast.success("Backup saved", {
           id: toastId,
@@ -1536,14 +1536,14 @@ export function App(): ReactElement {
       action: {
         label: "Cancel",
         onClick: () => {
-          void window.pixql.cancelRestore(taskId);
+          void window.xdb.cancelRestore(taskId);
         }
       }
     });
     restoreToastIds.current.set(taskId, toastId);
 
     try {
-      const result = await window.pixql.restoreDatabase(profileId, inlinePassword, taskId);
+      const result = await window.xdb.restoreDatabase(profileId, inlinePassword, taskId);
       if (result) {
         toast.success("Database restored", {
           id: toastId,
@@ -1582,7 +1582,7 @@ export function App(): ReactElement {
     }
 
     await runTask(async () => {
-      setStorageMetadata(await window.pixql.getStorageObjectMetadata(selectedProfileId, object.key));
+      setStorageMetadata(await window.xdb.getStorageObjectMetadata(selectedProfileId, object.key));
     });
   };
 
@@ -1620,7 +1620,7 @@ export function App(): ReactElement {
     }
 
     await runTask(async () => {
-      setStoragePreview(await window.pixql.previewStorageObject(selectedProfileId, selectedStorageObject.key));
+      setStoragePreview(await window.xdb.previewStorageObject(selectedProfileId, selectedStorageObject.key));
     });
   };
 
@@ -1630,7 +1630,7 @@ export function App(): ReactElement {
     }
 
     await runTask(async () => {
-      const result = await window.pixql.downloadStorageObject(selectedProfileId, selectedStorageObject.key);
+      const result = await window.xdb.downloadStorageObject(selectedProfileId, selectedStorageObject.key);
       if (result) {
         toast.success("File downloaded", { description: result.filePath });
       }
@@ -1639,7 +1639,7 @@ export function App(): ReactElement {
 
   const uploadStorageFiles = async (): Promise<void> => {
     await runTask(async () => {
-      const result = await window.pixql.uploadStorageFiles(selectedProfileId, storagePrefix);
+      const result = await window.xdb.uploadStorageFiles(selectedProfileId, storagePrefix);
       if (result) {
         toast.success("Files uploaded", { description: `${result.uploaded} uploaded, ${result.skipped} skipped` });
         await loadStorageObjects(selectedProfileId, storagePrefix, storageContinuationToken);
@@ -1649,7 +1649,7 @@ export function App(): ReactElement {
 
   const uploadStorageFolder = async (): Promise<void> => {
     await runTask(async () => {
-      const result = await window.pixql.uploadStorageFolder(selectedProfileId, storagePrefix);
+      const result = await window.xdb.uploadStorageFolder(selectedProfileId, storagePrefix);
       if (result) {
         toast.success("Folder uploaded", { description: `${result.uploaded} uploaded` });
         await loadStorageObjects(selectedProfileId, storagePrefix, storageContinuationToken);
@@ -1664,7 +1664,7 @@ export function App(): ReactElement {
     }
 
     await runTask(async () => {
-      await window.pixql.createStorageFolder(selectedProfileId, storagePrefix, name);
+      await window.xdb.createStorageFolder(selectedProfileId, storagePrefix, name);
       await loadStorageObjects(selectedProfileId, storagePrefix, storageContinuationToken);
     });
   };
@@ -1680,7 +1680,7 @@ export function App(): ReactElement {
     }
 
     await runTask(async () => {
-      await window.pixql.copyStorageObject({
+      await window.xdb.copyStorageObject({
         profileId: selectedProfileId,
         sourceKey: selectedStorageObject.key,
         destinationKey
@@ -1700,7 +1700,7 @@ export function App(): ReactElement {
     }
 
     await runTask(async () => {
-      await window.pixql.moveStorageObject({
+      await window.xdb.moveStorageObject({
         profileId: selectedProfileId,
         sourceKey: selectedStorageObject.key,
         destinationKey
@@ -1719,7 +1719,7 @@ export function App(): ReactElement {
     }
 
     await runTask(async () => {
-      await window.pixql.deleteStorageObjects({ profileId: selectedProfileId, keys: [selectedStorageObject.key] });
+      await window.xdb.deleteStorageObjects({ profileId: selectedProfileId, keys: [selectedStorageObject.key] });
       await loadStorageObjects(selectedProfileId, storagePrefix, storageContinuationToken);
     });
   };
@@ -1890,7 +1890,7 @@ export function App(): ReactElement {
     }
 
     await runTask(async () => {
-      const result = await window.pixql.executeQuery(selectedProfileId, sqlText);
+      const result = await window.xdb.executeQuery(selectedProfileId, sqlText);
       setQueryResult(result);
       setMode("query");
       await loadHistory(selectedProfileId);
@@ -1921,13 +1921,13 @@ export function App(): ReactElement {
     }
 
     await runTask(async () => {
-      const saved = await window.pixql.saveSavedQuery({
+      const saved = await window.xdb.saveSavedQuery({
         id: existing?.id,
         profileId: selectedProfileId,
         name,
         sql
       });
-      await Promise.all([loadSavedQueries(selectedProfileId), window.pixql.saveSqlDraft(selectedProfileId, sql)]);
+      await Promise.all([loadSavedQueries(selectedProfileId), window.xdb.saveSqlDraft(selectedProfileId, sql)]);
       setActiveSavedQueryId(saved.id);
       setSavedQueryName(saved.name);
       toast.success(existing ? "Saved query updated" : "Query saved", {
@@ -1948,7 +1948,7 @@ export function App(): ReactElement {
 
   const deleteSavedSqlQuery = async (query: SavedSqlQuery): Promise<void> => {
     await runTask(async () => {
-      await window.pixql.deleteSavedQuery(query.id);
+      await window.xdb.deleteSavedQuery(query.id);
       if (activeSavedQueryId === query.id) {
         setActiveSavedQueryId(null);
         setSavedQueryName("");
@@ -2210,7 +2210,7 @@ export function App(): ReactElement {
 
     await runTask(async () => {
       for (const row of rows) {
-        await window.pixql.deleteRow({
+        await window.xdb.deleteRow({
           profileId: selectedProfileId,
           schema: data.schema,
           table: data.table,
@@ -2237,7 +2237,7 @@ export function App(): ReactElement {
     }
 
     await runTask(async () => {
-      await window.pixql.insertRow({
+      await window.xdb.insertRow({
         profileId: selectedProfileId,
         schema: data.schema,
         table: data.table,
@@ -2268,7 +2268,7 @@ export function App(): ReactElement {
           continue;
         }
 
-        await window.pixql.updateRow({
+        await window.xdb.updateRow({
           profileId: selectedProfileId,
           schema: data.schema,
           table: data.table,
@@ -2278,7 +2278,7 @@ export function App(): ReactElement {
       }
 
       if (insertValues && Object.keys(insertValues).length > 0) {
-        await window.pixql.insertRow({
+        await window.xdb.insertRow({
           profileId: selectedProfileId,
           schema: data.schema,
           table: data.table,
@@ -2678,7 +2678,7 @@ export function App(): ReactElement {
                     history={history}
                     onClear={() =>
                       void runTask(async () => {
-                        await window.pixql.clearHistory();
+                        await window.xdb.clearHistory();
                         await loadHistory(selectedProfileId);
                       })
                     }
@@ -2961,9 +2961,9 @@ function SettingsModal({
               <h2 id="settings-about-title">About</h2>
             </div>
             <div className="settings-about">
-              <img className="settings-logo" src="/logo.svg" alt="PixQL logo" />
+              <img className="settings-logo" src="/logo.svg" alt="XDB logo" />
               <p className="settings-about-line">
-                <strong>PixQL</strong>
+                <strong>XDB</strong>
                 <span className="settings-app-version">v{appVersion}</span>
                 <span>Local database console for PostgreSQL, MySQL &amp; SQLite.</span>
               </p>
@@ -3192,7 +3192,7 @@ function DatabaseDropConfirmationDialog({
         </header>
 
         <div className="confirmation-dialog-body">
-          <p>The database and all of its data will be permanently deleted. Saved PixQL connections are kept.</p>
+          <p>The database and all of its data will be permanently deleted. Saved XDB connections are kept.</p>
           <code>{databaseName}</code>
         </div>
 
@@ -6287,7 +6287,7 @@ function ConnectionModal({
 
   const iconMode = form.iconMode ?? "default";
   const pickIconImage = async (): Promise<void> => {
-    const dataUrl = await window.pixql.selectConnectionIconImage();
+    const dataUrl = await window.xdb.selectConnectionIconImage();
     if (dataUrl) {
       update("iconImage", dataUrl);
     }
@@ -6422,7 +6422,7 @@ function ConnectionModal({
                             type="button"
                             onClick={() => {
                               void (async () => {
-                                const filePath = await window.pixql.selectSqliteDatabaseFile();
+                                const filePath = await window.xdb.selectSqliteDatabaseFile();
                                 if (filePath) {
                                   update("filePath", filePath);
                                   update("database", filePath.split(/[/\\]/).pop() || filePath);
@@ -7778,7 +7778,7 @@ function removeStoredValue(storageKey: string): void {
 }
 
 function tableColumnLayoutStorageKey(profileId: string, schema: string, table: string): string {
-  return `pixql:data-grid-layout:${profileId}:${schema}.${table}`;
+  return `xdb:data-grid-layout:${profileId}:${schema}.${table}`;
 }
 
 function readColumnLayout(storageKey: string, columnNames: string[]): ColumnLayout {

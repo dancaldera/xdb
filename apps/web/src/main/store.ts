@@ -49,7 +49,7 @@ const DEFAULT_STATE: PersistedState = {
 };
 
 export function defaultDataDir(): string {
-  return process.env.PIXQL_DATA_DIR ?? join(homedir(), ".pixql");
+  return process.env.XDB_DATA_DIR ?? join(homedir(), ".xdb");
 }
 
 export class AppStore {
@@ -57,7 +57,7 @@ export class AppStore {
   private historyQueue: Promise<void> = Promise.resolve();
 
   constructor(dataDir: string = defaultDataDir()) {
-    this.filePath = join(dataDir, "pixql-state.json");
+    this.filePath = join(dataDir, "xdb-state.json");
   }
 
   async listConnections(): Promise<ConnectionProfile[]> {

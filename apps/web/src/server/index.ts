@@ -10,9 +10,9 @@ import { AppStore } from "../main/store";
 import { StorageService } from "../main/storage";
 import { createApiHandlers } from "./api";
 
-const PORT = Number(process.env.PIXQL_PORT ?? 4595);
-const HOST = process.env.PIXQL_HOST ?? "127.0.0.1";
-const DATA_DIR = process.env.PIXQL_DATA_DIR ?? join(homedir(), ".pixql");
+const PORT = Number(process.env.XDB_PORT ?? 4595);
+const HOST = process.env.XDB_HOST ?? "127.0.0.1";
+const DATA_DIR = process.env.XDB_DATA_DIR ?? join(homedir(), ".xdb");
 const STATIC_DIR = resolve(import.meta.dirname, "../../dist/web");
 const APP_VERSION = JSON.parse(await readFile(resolve(import.meta.dirname, "../../package.json"), "utf8"))
   .version as string;
@@ -261,6 +261,6 @@ const server = createServer((req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`PixQL web server running at http://${HOST}:${PORT}`);
+  console.log(`XDB web server running at http://${HOST}:${PORT}`);
   console.log(`Data directory: ${DATA_DIR}`);
 });

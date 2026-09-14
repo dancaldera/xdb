@@ -35,7 +35,7 @@ const restoreControllers = new Map<string, AbortController>();
 function defaultConnectionArchiveFileName(includeSecrets: boolean): string {
   const date = new Date().toISOString().slice(0, 10);
   const mode = includeSecrets ? "complete" : "safe";
-  return `pixql-connections-${mode}-${date}.pixql-connections.json`;
+  return `xdb-connections-${mode}-${date}.xdb-connections.json`;
 }
 
 const ICON_IMAGE_MIME_TYPES: Record<string, string> = {

@@ -37,7 +37,7 @@ class FakeClient {
 }
 
 async function withTempFile(content: string | Buffer, run: (filePath: string) => Promise<void>): Promise<void> {
-  const directory = await mkdtemp(join(tmpdir(), "pixql-restore-test-"));
+  const directory = await mkdtemp(join(tmpdir(), "xdb-restore-test-"));
   const filePath = join(directory, "backup.sql");
 
   try {
@@ -56,7 +56,7 @@ describe("isCustomFormatDump", () => {
   });
 
   test("rejects plain SQL files and short files", async () => {
-    await withTempFile("-- PixQL plain SQL backup\nSELECT 1;\n", async (filePath) => {
+    await withTempFile("-- XDB plain SQL backup\nSELECT 1;\n", async (filePath) => {
       expect(await isCustomFormatDump(filePath)).toBe(false);
     });
     await withTempFile("PG", async (filePath) => {

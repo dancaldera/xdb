@@ -185,7 +185,7 @@ describe("StorageService", () => {
     );
     const service = new StorageService(new FakeStore(profile) as unknown as AppStore, () => client as never);
     await service.connect(profile.id);
-    const tempDir = await mkdtemp(join(tmpdir(), "pixql-storage-"));
+    const tempDir = await mkdtemp(join(tmpdir(), "xdb-storage-"));
     const filePath = join(tempDir, "cat.png");
 
     try {

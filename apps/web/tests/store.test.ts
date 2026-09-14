@@ -11,7 +11,7 @@ describe("AppStore connection picker layout", () => {
   let AppStore: AppStoreModule["AppStore"];
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "pixql-store-"));
+    tempDir = await mkdtemp(join(tmpdir(), "xdb-store-"));
 
     const storeModule = await import("../src/main/store");
     AppStore = storeModule.AppStore;
@@ -46,7 +46,7 @@ describe("AppStore connection picker layout", () => {
 
     expect(stored).toEqual(layout);
 
-    const raw = await readFile(join(tempDir, "pixql-state.json"), "utf8");
+    const raw = await readFile(join(tempDir, "xdb-state.json"), "utf8");
     const parsed = JSON.parse(raw);
     expect(parsed.connectionPickerLayout).toEqual(layout);
   });
@@ -92,11 +92,11 @@ describe("AppStore connection picker layout", () => {
       connectionOrder: {}
     });
 
-    const raw = await readFile(join(tempDir, "pixql-state.json"), "utf8");
+    const raw = await readFile(join(tempDir, "xdb-state.json"), "utf8");
     const parsed = JSON.parse(raw);
     parsed.connectionPickerLayout = "not-an-object";
     const corrupted = JSON.stringify(parsed);
-    await writeFile(join(tempDir, "pixql-state.json"), corrupted);
+    await writeFile(join(tempDir, "xdb-state.json"), corrupted);
 
     const retrieved = await store.getConnectionPickerLayout();
     expect(retrieved).toBeNull();
@@ -117,7 +117,7 @@ describe("AppStore connection picker layout", () => {
     const legacyItem = historyItem("legacy");
     const { source: _source, target: _target, ...legacyHistoryItem } = legacyItem;
     await writeFile(
-      join(tempDir, "pixql-state.json"),
+      join(tempDir, "xdb-state.json"),
       JSON.stringify({ connections: [], groups: [], history: [legacyHistoryItem] }),
       "utf8"
     );
@@ -184,7 +184,7 @@ describe("AppStore connection picker layout", () => {
 
   test("reads legacy state without saved query fields", async () => {
     await writeFile(
-      join(tempDir, "pixql-state.json"),
+      join(tempDir, "xdb-state.json"),
       JSON.stringify({ connections: [], groups: [], history: [] }),
       "utf8"
     );

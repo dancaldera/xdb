@@ -8,7 +8,7 @@ const packageJson = JSON.parse(readFileSync(resolve(import.meta.dirname, "packag
   version: string;
 };
 
-const apiPort = process.env.PIXQL_PORT ?? "4595";
+const apiPort = process.env.XDB_PORT ?? "4595";
 
 export default defineConfig({
   plugins: [tailwindcss(), react()],

@@ -97,7 +97,7 @@ describe("connection archives", () => {
     expect(() => parseConnectionArchive({})).toThrow("Connection archive format must be a string");
     expect(() =>
       parseConnectionArchive({
-        format: "pixql.connections",
+        format: "xdb.connections",
         version: 2,
         exportedAt: "2026-02-01T00:00:00.000Z",
         includeSecrets: false,
@@ -107,7 +107,7 @@ describe("connection archives", () => {
     ).toThrow("version 2 is not supported");
     expect(() =>
       parseConnectionArchive({
-        format: "pixql.connections",
+        format: "xdb.connections",
         version: "1",
         exportedAt: "2026-02-01T00:00:00.000Z",
         includeSecrets: false,
@@ -117,7 +117,7 @@ describe("connection archives", () => {
     ).not.toThrow();
     expect(() =>
       parseConnectionArchive({
-        format: "pixql.connections",
+        format: "xdb.connections",
         version: 1,
         exportedAt: "2026-02-01T00:00:00.000Z",
         includeSecrets: false,

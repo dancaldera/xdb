@@ -80,7 +80,7 @@ export type ConnectionGroupInput = {
 };
 
 export type ConnectionArchive = {
-  format: "pixql.connections";
+  format: "xdb.connections";
   version: 1;
   exportedAt: string;
   includeSecrets: boolean;

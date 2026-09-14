@@ -92,7 +92,7 @@ describe("connection input normalization", () => {
       host: "",
       port: 0,
       database: "",
-      filePath: "/tmp/pixql/app.sqlite",
+      filePath: "/tmp/xdb/app.sqlite",
       user: "",
       sslMode: "disable"
     });
@@ -100,7 +100,7 @@ describe("connection input normalization", () => {
     expect(normalized.name).toBe("app.sqlite");
     expect(normalized.engine).toBe("sqlite");
     expect(normalized.database).toBe("app.sqlite");
-    expect(normalized.filePath).toBe("/tmp/pixql/app.sqlite");
+    expect(normalized.filePath).toBe("/tmp/xdb/app.sqlite");
     expect(normalized.host).toBe("");
     expect(normalized.port).toBe(0);
     expect(normalized.user).toBe("");
@@ -109,12 +109,12 @@ describe("connection input normalization", () => {
   test("builds a SQLite connection profile from a URL", () => {
     const normalized = normalizeConnectionInput({
       ...BASE_INPUT,
-      connectionUrl: "sqlite:///tmp/pixql/app.sqlite"
+      connectionUrl: "sqlite:///tmp/xdb/app.sqlite"
     });
 
     expect(normalized.engine).toBe("sqlite");
     expect(normalized.database).toBe("app.sqlite");
-    expect(normalized.filePath).toBe("/tmp/pixql/app.sqlite");
+    expect(normalized.filePath).toBe("/tmp/xdb/app.sqlite");
   });
 
   test("rejects SQLite profiles without a file path", () => {
@@ -362,12 +362,12 @@ describe("connection string formatting", () => {
         host: "",
         port: 0,
         database: "app.sqlite",
-        filePath: "/tmp/pixql/app.sqlite",
+        filePath: "/tmp/xdb/app.sqlite",
         user: "",
         password: "",
         sslMode: "disable"
       })
-    ).toBe("sqlite:///tmp/pixql/app.sqlite");
+    ).toBe("sqlite:///tmp/xdb/app.sqlite");
   });
 
   test("builds a Turso connection string", () => {

@@ -10,7 +10,7 @@ import type {
   SslMode
 } from "./types";
 
-export const CONNECTION_ARCHIVE_FORMAT = "pixql.connections";
+export const CONNECTION_ARCHIVE_FORMAT = "xdb.connections";
 export const CONNECTION_ARCHIVE_VERSION = 1;
 
 const CONNECTION_ENGINES = new Set<ConnectionEngine>([

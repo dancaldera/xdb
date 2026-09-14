@@ -6,6 +6,6 @@ declare global {
   const __APP_VERSION__: string;
 
   interface Window {
-    pixql: AppApi;
+    xdb: AppApi;
   }
 }

@@ -1,9 +1,9 @@
-# PixQL — Style Reference
+# XDB — Style Reference
 > monospaced control room for database work. Black-and-white operational surfaces, catalog-like labels, no decoration.
 
 **Themes:** light + dark
 
-PixQL follows the 099 Supply reference as a local web database client: an aggressively achromatic interface, one monospaced voice, compact operational surfaces, and hierarchy created through tone, borders, position, and density — not color, shadows, gradients, icons-as-decoration, or font-weight changes. The product should feel like a precise database console: quiet, technical, and confident.
+XDB follows the 099 Supply reference as a local web database client: an aggressively achromatic interface, one monospaced voice, compact operational surfaces, and hierarchy created through tone, borders, position, and density — not color, shadows, gradients, icons-as-decoration, or font-weight changes. The product should feel like a precise database console: quiet, technical, and confident.
 
 The dark theme is the primary expression: pure black canvas, carbon panels, white text. The light theme is the inverse working mode: white canvas, black text, restrained gray borders, and the same monospaced density. Both themes share one design language and one token model.
 
@@ -248,7 +248,7 @@ Thin circular spinner using `--text-primary` stroke on `--surface-base` or `--su
 | 2 | Bordered White | `#ffffff` | Panels and cards separated by gray borders |
 | 3 | Ink | `#000000` | Inverted active states and primary text |
 
-## PixQL Application Adaptations
+## XDB Application Adaptations
 
 - Treat the app as a control room, not a marketing page: full viewport, compact panels, clear borders.
 - Keep connection management, schema browsing, query writing, results, filters, pagination, and row editing within the same monochrome system.

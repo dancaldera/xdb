@@ -600,7 +600,7 @@ export class PostgresService {
 
     if (extension === ".dump" || extension === ".backup" || (await isCustomFormatDump(filePath))) {
       throw new Error(
-        "This file is a custom-format PostgreSQL archive (pg_dump -Fc). PixQL restores plain .sql backups only — restore this file with pg_restore, or create backups with PixQL instead."
+        "This file is a custom-format PostgreSQL archive (pg_dump -Fc). XDB restores plain .sql backups only — restore this file with pg_restore, or create backups with XDB instead."
       );
     }
 

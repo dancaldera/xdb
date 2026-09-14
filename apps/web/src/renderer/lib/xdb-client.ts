@@ -300,8 +300,8 @@ const api: AppApi = {
 
 declare global {
   interface Window {
-    pixql: AppApi;
+    xdb: AppApi;
   }
 }
 
-window.pixql = api;
+window.xdb = api;

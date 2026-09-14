@@ -1,5 +1,5 @@
 {
-  "name": "pixql-workspace",
+  "name": "xdb-workspace",
   "version": "0.0.1",
   "private": true,
   "workspaces": [
@@ -7,23 +7,24 @@
   ],
   "type": "module",
   "scripts": {
-    "dev": "pnpm --filter @pixql/web dev",
-    "build": "pnpm --filter @pixql/web build",
-    "start": "pnpm --filter @pixql/web start",
-    "test": "pnpm --filter @pixql/web test",
-    "typecheck": "pnpm --filter @pixql/web typecheck",
-    "landing:dev": "pnpm --filter @pixql/landing dev",
-    "landing:build": "pnpm --filter @pixql/landing build",
-    "landing:preview": "pnpm --filter @pixql/landing preview",
+    "dev": "pnpm --filter @xdb/web dev",
+    "build": "pnpm --filter @xdb/web build",
+    "start": "pnpm --filter @xdb/web start",
+    "test": "pnpm --filter @xdb/web test",
+    "typecheck": "pnpm --filter @xdb/web typecheck",
+    "landing:dev": "pnpm --filter @xdb/landing dev",
+    "landing:build": "pnpm --filter @xdb/landing build",
+    "landing:preview": "pnpm --filter @xdb/landing preview",
     "lint": "biome lint .",
     "format": "biome format --write .",
-    "version:show": "pnpm --filter @pixql/web exec node scripts/version.mjs show",
-    "version:set": "pnpm --filter @pixql/web exec node scripts/version.mjs set",
-    "version:patch": "pnpm --filter @pixql/web exec node scripts/version.mjs patch",
-    "version:minor": "pnpm --filter @pixql/web exec node scripts/version.mjs minor",
-    "version:major": "pnpm --filter @pixql/web exec node scripts/version.mjs major"
+    "version:show": "pnpm --filter @xdb/web exec node scripts/version.mjs show",
+    "version:set": "pnpm --filter @xdb/web exec node scripts/version.mjs set",
+    "version:patch": "pnpm --filter @xdb/web exec node scripts/version.mjs patch",
+    "version:minor": "pnpm --filter @xdb/web exec node scripts/version.mjs minor",
+    "version:major": "pnpm --filter @xdb/web exec node scripts/version.mjs major"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.10"
+    "@biomejs/biome": "^2.5.10",
+    "node-gyp": "^13.0.2"
   }
 }

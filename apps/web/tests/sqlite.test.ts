@@ -26,7 +26,7 @@ describe("SQLite adapter", () => {
   let store: FakeStore;
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "pixql-sqlite-"));
+    tempDir = await mkdtemp(join(tmpdir(), "xdb-sqlite-"));
     const filePath = join(tempDir, "app.sqlite");
     const profile: ConnectionProfile = {
       id: "sqlite-profile",

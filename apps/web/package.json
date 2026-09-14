@@ -1,9 +1,9 @@
 {
-  "name": "@pixql/web",
+  "name": "@xdb/web",
   "version": "0.0.1",
   "description": "A local web database client for PostgreSQL, MySQL, and SQLite built with Node, React, and Vite.",
   "author": "Daniel Caldera",
-  "homepage": "https://github.com/dancaldera/pixql",
+  "homepage": "https://github.com/dancaldera/xdb",
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",

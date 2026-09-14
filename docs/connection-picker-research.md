@@ -1,6 +1,6 @@
 # Connection Selector & Menu — UI Research
 
-> Research question: what is the best possible UI for PixQL's topbar connection selector (`connection-picker-trigger`) and its dropdown menu (`connection-picker-menu`)?
+> Research question: what is the best possible UI for XDB's topbar connection selector (`connection-picker-trigger`) and its dropdown menu (`connection-picker-menu`)?
 >
 > Sources consulted: TablePlus docs, DataGrip docs, DBeaver docs, Beekeeper Studio release notes/config, W3C WAI-ARIA Authoring Practices (Combobox Pattern), Nielsen Norman Group dropdown guidelines. All claims link to their primary source.
 
@@ -27,7 +27,7 @@
 ## 2. Interaction-pattern guidance (authoritative)
 
 ### W3C WAI-ARIA APG — Combobox Pattern
-The current PixQL menu is `role="menu"` with buttons inside — a mismatch: `menu` expects `menuitem` descendants and command semantics, not value selection with nested groups. The correct pattern is an **editable combobox with a listbox popup** ([W3C APG](https://www.w3.org/WAI/ARIA/apg/patterns/combobox)):
+The current XDB menu is `role="menu"` with buttons inside — a mismatch: `menu` expects `menuitem` descendants and command semantics, not value selection with nested groups. The correct pattern is an **editable combobox with a listbox popup** ([W3C APG](https://www.w3.org/WAI/ARIA/apg/patterns/combobox)):
 
 - Trigger/input carries `role="combobox"`, `aria-expanded`, `aria-controls` → popup `role="listbox"` with `role="option"` children; DOM focus stays on the input, visual focus moves via `aria-activedescendant`.
 - Keyboard contract: `↓/↑` move options (wrap allowed), `Enter` accepts/connects, `Esc` closes without changing anything, printable characters type into the filter, `Home/End` optional.
@@ -39,7 +39,7 @@ The current PixQL menu is `role="menu"` with buttons inside — a mismatch: `men
 - Menus are for commands; selecting an object (a connection) is fine in a dropdown, but *rare commands* (import/export) buried as icons in a header have poor discoverability ([Menu-Design Checklist](https://www.nngroup.com/articles/menu-design)).
 - Avoid deep nesting/cascading; keep the most-used item closest to the trigger (Fitts's law).
 
-## 3. Problems in the current PixQL implementation
+## 3. Problems in the current XDB implementation
 
 Observed in `apps/web/src/renderer/App.tsx` (~L3192–3540) and `apps/web/src/renderer/styles/app.css`:
 
@@ -94,7 +94,7 @@ Observed in `apps/web/src/renderer/App.tsx` (~L3192–3540) and `apps/web/src/re
 | Trigger | Single-line ~34–36px: engine glyph, truncated name, state dot, chevron; full metadata lives in the menu | compact-density DESIGN.md |
 | Menu chrome | Panel bg + 1px `--border-subtle`, 10px radius, no box-shadow (tone separation only) | DESIGN.md borders/shadow rules |
 
-### Sizing (PixQL tokens)
+### Sizing (XDB tokens)
 
 - Trigger: height 34–36px (down from 44px), radius 10px, border `--border-subtle`.
 - Menu width: 320–360px; max-height `min(480px, calc(100vh − 96px))`.

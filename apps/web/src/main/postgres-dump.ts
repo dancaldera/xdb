@@ -71,7 +71,7 @@ async function writeDump(
   const views = await listViews(client);
 
   await writeBackupLines(writer, [
-    "-- PixQL plain SQL backup",
+    "-- XDB plain SQL backup",
     `-- Created at ${new Date().toISOString()}`,
     "",
     "BEGIN;",

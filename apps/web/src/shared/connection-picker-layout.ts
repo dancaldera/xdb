@@ -1,7 +1,7 @@
 import type { ConnectionPickerLayout } from "./types";
 
-export const CONNECTION_PICKER_LAYOUT_STORAGE_KEY = "pixql:connection-picker:layout";
-export const CONNECTION_PICKER_COLLAPSED_LEGACY_STORAGE_KEY = "pixql:connection-picker:collapsed";
+export const CONNECTION_PICKER_LAYOUT_STORAGE_KEY = "xdb:connection-picker:layout";
+export const CONNECTION_PICKER_COLLAPSED_LEGACY_STORAGE_KEY = "xdb:connection-picker:collapsed";
 export const UNGROUPED_SECTION_KEY = "__ungrouped__";
 
 export type ConnectionGroupSectionLike = {

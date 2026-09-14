@@ -130,6 +130,6 @@ describe("applyConnectionPickerLayout", () => {
 
 describe("legacy storage keys", () => {
   test("exposes the legacy collapsed key constant for migration", () => {
-    expect(CONNECTION_PICKER_COLLAPSED_LEGACY_STORAGE_KEY).toBe("pixql:connection-picker:collapsed");
+    expect(CONNECTION_PICKER_COLLAPSED_LEGACY_STORAGE_KEY).toBe("xdb:connection-picker:collapsed");
   });
 });

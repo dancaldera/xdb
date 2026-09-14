@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { createTursoQueryExecutionResult } from "../src/main/database";
 
 describe("Turso adapter helpers", () => {
-  test("maps libSQL result sets into PixQL query results", () => {
+  test("maps libSQL result sets into XDB query results", () => {
     const result = createTursoQueryExecutionResult(
       {
         columns: ["id", "name"],

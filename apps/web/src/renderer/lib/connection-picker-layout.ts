@@ -103,7 +103,7 @@ export function useConnectionPickerLayout<T extends ConnectionGroupSectionLike>(
 
     void (async (): Promise<void> => {
       try {
-        let stored = await window.pixql.getConnectionPickerLayout();
+        let stored = await window.xdb.getConnectionPickerLayout();
         let migratedLegacy = false;
 
         if (!stored) {
@@ -123,7 +123,7 @@ export function useConnectionPickerLayout<T extends ConnectionGroupSectionLike>(
 
         if (migratedLegacy && stored) {
           try {
-            await window.pixql.saveConnectionPickerLayout(stored);
+            await window.xdb.saveConnectionPickerLayout(stored);
           } catch {
             // Best-effort migration write.
           } finally {
@@ -170,7 +170,7 @@ export function useConnectionPickerLayout<T extends ConnectionGroupSectionLike>(
 
       void (async (): Promise<void> => {
         try {
-          await window.pixql.saveConnectionPickerLayout(nextLayout);
+          await window.xdb.saveConnectionPickerLayout(nextLayout);
         } catch {
           // Scroll persistence should never block the app.
         }
@@ -198,7 +198,7 @@ export function useConnectionPickerLayout<T extends ConnectionGroupSectionLike>(
 
       void (async (): Promise<void> => {
         try {
-          await window.pixql.saveConnectionPickerLayout(reconciled);
+          await window.xdb.saveConnectionPickerLayout(reconciled);
         } catch {
           // Layout persistence should never block the app.
         }
