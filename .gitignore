@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+
+# Build output
+out/
+dist/
+release/
+.astro/
+
+# Test and coverage output
+coverage/
+.nyc_output/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+bun-debug.log*
+
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor and tooling state
+.idea/
+.vscode/
+.wrangler/
+*.swp
+*.swo
+
+# Electron/local runtime data
+*.db
+*.sqlite
+*.sqlite3
+*.pid

@@ -1,0 +1,38 @@
+---
+// biome-ignore-all lint/correctness/noUnusedVariables: Astro template expressions consume these props.
+import "../styles/global.css";
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const {
+  title = "PixQL - Local web database client",
+  description = "A local database client for PostgreSQL, MySQL, SQLite, Turso, D1, and S3."
+} = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="description" content={description} />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="generator" content={Astro.generator} />
+    <script is:inline>
+      (function () {
+        var media = window.matchMedia("(prefers-color-scheme: dark)");
+        var applyTheme = function () {
+          document.documentElement.dataset.theme = media.matches ? "dark" : "light";
+        };
+        applyTheme();
+        media.addEventListener("change", applyTheme);
+      })();
+    </script>
+    <title>{title}</title>
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>

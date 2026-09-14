@@ -1,0 +1,9 @@
+packages:
+  - apps/*
+
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+
+minimumReleaseAgeExclude:
+  - astro@7.2.7

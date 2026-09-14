@@ -1,0 +1,29 @@
+{
+  "name": "pixql-workspace",
+  "version": "0.0.1",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter @pixql/web dev",
+    "build": "pnpm --filter @pixql/web build",
+    "start": "pnpm --filter @pixql/web start",
+    "test": "pnpm --filter @pixql/web test",
+    "typecheck": "pnpm --filter @pixql/web typecheck",
+    "landing:dev": "pnpm --filter @pixql/landing dev",
+    "landing:build": "pnpm --filter @pixql/landing build",
+    "landing:preview": "pnpm --filter @pixql/landing preview",
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "version:show": "pnpm --filter @pixql/web exec node scripts/version.mjs show",
+    "version:set": "pnpm --filter @pixql/web exec node scripts/version.mjs set",
+    "version:patch": "pnpm --filter @pixql/web exec node scripts/version.mjs patch",
+    "version:minor": "pnpm --filter @pixql/web exec node scripts/version.mjs minor",
+    "version:major": "pnpm --filter @pixql/web exec node scripts/version.mjs major"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.10"
+  }
+}

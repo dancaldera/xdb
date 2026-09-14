@@ -1,0 +1,115 @@
+---
+// biome-ignore-all lint/correctness/noUnusedImports: Astro component tags consume these imports.
+// biome-ignore-all lint/correctness/noUnusedVariables: Astro template expressions consume these constants.
+import ProductMock from "../components/ProductMock.astro";
+import SiteHeader from "../components/SiteHeader.astro";
+import BaseLayout from "../layouts/BaseLayout.astro";
+
+const features = [
+  {
+    title: "Local-first connections",
+    copy: "PostgreSQL, MySQL, SQLite, Turso, D1, and S3 profiles stay on your machine."
+  },
+  {
+    title: "Table-first browsing",
+    copy: "Schemas, tables, views, and rows in compact controls."
+  },
+  {
+    title: "SQL editor and history",
+    copy: "Run SQL, see durations and counts, reuse history and saved queries."
+  },
+  {
+    title: "Structure inspection",
+    copy: "Columns, keys, defaults, and indexes beside the data."
+  },
+  {
+    title: "Export and clipboard",
+    copy: "Export filtered CSV. Copy rows as text, JSON, Markdown, or inserts."
+  },
+  {
+    title: "Backup and restore",
+    copy: "Plain-SQL PostgreSQL backups and restores from the connection picker."
+  }
+];
+
+const sources = [
+  { name: "PostgreSQL", icon: "/database-icons/postgresql.svg" },
+  { name: "MySQL", icon: "/database-icons/mysql.svg" },
+  { name: "SQLite", icon: "/database-icons/sqlite.svg" },
+  { name: "Turso", icon: "/database-icons/turso.svg" },
+  { name: "Cloudflare D1", icon: "/database-icons/cloudflare-d1.svg" },
+  { name: "S3-compatible storage", icon: "/database-icons/s3-compatible.svg" }
+];
+---
+
+<BaseLayout>
+  <SiteHeader />
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow">Local web database client</p>
+        <h1 id="hero-title">PixQL</h1>
+        <p class="hero-lede">
+          Browse, query, edit, and export the databases you already use — all from your machine.
+        </p>
+        <div class="hero-actions">
+          <a class="button primary" href="#features">Explore features</a>
+        </div>
+      </div>
+      <ProductMock />
+    </section>
+
+    <section class="source-strip" aria-label="Supported sources">
+      {
+        sources.map((source) => (
+          <div class="source-item">
+            <img src={source.icon} alt="" width="22" height="22" />
+            <span>{source.name}</span>
+          </div>
+        ))
+      }
+    </section>
+
+    <section class="section-block" id="features" aria-labelledby="features-title">
+      <div class="section-heading">
+        <p class="eyebrow">Features</p>
+        <h2 id="features-title">Database work that stays on your machine.</h2>
+      </div>
+      <div class="feature-grid">
+        {
+          features.map((feature) => (
+            <article class="feature-card">
+              <h3>{feature.title}</h3>
+              <p>{feature.copy}</p>
+            </article>
+          ))
+        }
+      </div>
+    </section>
+
+    <section class="workflow-section" id="workflow" aria-labelledby="workflow-title">
+      <div class="section-heading">
+        <p class="eyebrow">Workflow</p>
+        <h2 id="workflow-title">Connect, inspect, ship.</h2>
+      </div>
+      <div class="workflow-list">
+        <div>
+          <span>01</span>
+          <strong>Choose a saved profile.</strong>
+          <p>Status, groups, backups, and restores in one picker.</p>
+        </div>
+        <div>
+          <span>02</span>
+          <strong>Work from the object tab.</strong>
+          <p>Filters, sort, drafts, and structure stay with each table.</p>
+        </div>
+        <div>
+          <span>03</span>
+          <strong>Export only what you mean.</strong>
+          <p>Exports and clipboard formats follow the rows in view.</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</BaseLayout>

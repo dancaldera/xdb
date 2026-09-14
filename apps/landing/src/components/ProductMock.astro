@@ -1,0 +1,60 @@
+<figure class="product-mock" aria-label="PixQL database workspace preview">
+  <div class="mock-topbar">
+    <div class="mock-traffic" aria-hidden="true">
+      <span></span>
+      <span></span>
+      <span></span>
+    </div>
+    <div class="mock-picker">
+      <span class="status-dot"></span>
+      <strong>Production warehouse</strong>
+    </div>
+  </div>
+
+  <div class="mock-body">
+    <aside class="mock-sidebar">
+      <strong>Objects</strong>
+      <div class="mock-group">
+        <span>customers</span>
+        <span class="active">invoice_events</span>
+        <span>orders</span>
+        <span>audit_log</span>
+      </div>
+    </aside>
+
+    <section class="mock-workspace">
+      <div class="mock-mode-tabs">
+        <span class="active">Data</span>
+        <span>Query</span>
+        <span>Structure</span>
+      </div>
+      <div class="mock-filterbar">
+        <span>schema = public</span>
+        <span>rows &gt; 1000</span>
+      </div>
+      <div class="mock-grid" role="table" aria-label="Minimal table preview">
+        <div class="mock-grid-row header" role="row">
+          <span role="columnheader">id</span>
+          <span role="columnheader">event_table</span>
+          <span role="columnheader">rows</span>
+          <span role="columnheader">latency</span>
+        </div>
+        <div class="mock-grid-row active" role="row">
+          <span role="cell">1024</span>
+          <span role="cell">invoice_events</span>
+          <span role="cell">21,480</span>
+          <span role="cell">42 ms</span>
+        </div>
+        <div class="mock-grid-row" role="row">
+          <span role="cell">1025</span>
+          <span role="cell">customers</span>
+          <span role="cell">8,104</span>
+          <span role="cell">38 ms</span>
+        </div>
+      </div>
+      <div class="mock-bottom">
+        <code>select * from public.invoice_events;</code>
+      </div>
+    </section>
+  </div>
+</figure>
