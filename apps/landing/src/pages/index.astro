@@ -4,6 +4,11 @@
 import ProductMock from "../components/ProductMock.astro";
 import SiteHeader from "../components/SiteHeader.astro";
 import BaseLayout from "../layouts/BaseLayout.astro";
+import packageJson from "../../package.json";
+
+const version = packageJson.version;
+const githubUrl = "https://github.com/dancaldera/xdb";
+const serviceDocsUrl = `${githubUrl}/blob/main/docs/running-as-a-service.md`;
 
 const features = [
   {
@@ -53,7 +58,8 @@ const sources = [
           Browse, query, edit, and export the databases you already use — all from your machine.
         </p>
         <div class="hero-actions">
-          <a class="button primary" href="#features">Explore features</a>
+          <a class="button primary" href="#install">Get started</a>
+          <a class="button secondary" href={githubUrl} target="_blank" rel="noopener noreferrer">GitHub</a>
         </div>
       </div>
       <ProductMock />
@@ -111,5 +117,35 @@ const sources = [
       </div>
     </section>
 
+    <section class="section-block" id="install" aria-labelledby="install-title">
+      <div class="section-heading">
+        <p class="eyebrow">Install</p>
+        <h2 id="install-title">Clone it, build it, keep it running.</h2>
+        <p>XDB is a local Node server plus a React app — all you need is Node.js and pnpm.</p>
+      </div>
+      <div class="install-grid">
+        <article class="install-card">
+          <h3>Quick start</h3>
+          <pre class="code-block"><code>git clone https://github.com/dancaldera/xdb
+cd xdb
+pnpm install
+pnpm build
+pnpm start</code></pre>
+          <p>Serves the app at <code>http://127.0.0.1:4595</code>.</p>
+        </article>
+        <article class="install-card">
+          <h3>Run it as a service</h3>
+          <p>Start XDB at login, keep it in the background, and let it pull, rebuild, and restart itself daily from GitHub — launchd on macOS, systemd on Linux.</p>
+          <a class="button secondary" href={serviceDocsUrl} target="_blank" rel="noopener noreferrer">Service setup guide</a>
+        </article>
+      </div>
+    </section>
   </main>
+  <footer class="site-footer">
+    <span>XDB v{version}</span>
+    <nav aria-label="Footer">
+      <a href={githubUrl} target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href={serviceDocsUrl} target="_blank" rel="noopener noreferrer">Run as a service</a>
+    </nav>
+  </footer>
 </BaseLayout>

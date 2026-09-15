@@ -423,6 +423,38 @@
     @apply font-iowanold text-[20px] leading-[1.2] font-normal text-ink-black;
   }
 
+  .install-grid {
+    @apply mt-[24px] grid gap-[8px] md:grid-cols-2;
+  }
+
+  .install-card {
+    @apply grid content-start justify-items-start gap-[10px] rounded-cards border border-whisper-border bg-surface-subtle-card p-[14px];
+  }
+
+  .install-card h3 {
+    @apply m-0 font-iowanold text-[20px] leading-[1.2] font-normal text-ink-black;
+  }
+
+  .install-card p {
+    @apply m-0 text-body-sm leading-body-sm text-slate-gray;
+  }
+
+  .code-block {
+    @apply m-0 w-full overflow-x-auto rounded-[7px] border border-ghost-border bg-parchment px-[10px] py-[8px] text-[12px] leading-[1.7] text-ink-black;
+  }
+
+  .site-footer {
+    @apply mx-auto flex w-full max-w-[1200px] flex-wrap items-center justify-between gap-[8px] border-t border-whisper-border px-[16px] py-[24px] text-[12px] text-slate-gray md:px-[24px];
+  }
+
+  .site-footer nav {
+    @apply flex items-center gap-[16px];
+  }
+
+  .site-footer a {
+    @apply no-underline hover:text-ink-black;
+  }
+
   @media (max-width: 767px) {
     .hero {
       @apply min-h-[78svh];
