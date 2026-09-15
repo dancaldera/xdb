@@ -2,6 +2,7 @@
   "name": "xdb-workspace",
   "version": "0.0.2",
   "private": true,
+  "packageManager": "pnpm@12.4.1",
   "workspaces": [
     "apps/*"
   ],
