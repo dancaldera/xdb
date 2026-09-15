@@ -375,7 +375,7 @@ const EMPTY_CONNECTION: ConnectionInput = {
   kind: "database",
   engine: "postgresql",
   name: "",
-  connectionUrl: "",
+  connectionUrl: undefined,
   host: "localhost",
   port: 5432,
   database: "postgres",
@@ -6209,7 +6209,7 @@ function ConnectionModal({
   const colorPickerValue = /^#[0-9a-fA-F]{6}$/.test(form.color) ? form.color : EMPTY_CONNECTION.color;
 
   const connectionStringValue = engine
-    ? form.connectionUrl || buildConnectionString({ ...form, engine, password: form.password ?? "" })
+    ? (form.connectionUrl ?? buildConnectionString({ ...form, engine, password: form.password ?? "" }))
     : "";
   const connectionStringPlaceholder = engine
     ? engine === "sqlite"
@@ -6388,8 +6388,11 @@ function ConnectionModal({
                           value={connectionStringValue}
                           onChange={(event) => update("connectionUrl", event.target.value)}
                           onBlur={() => {
-                            if (form.connectionUrl) {
-                              mergeUrlIntoForm(form.connectionUrl);
+                            const url = form.connectionUrl?.trim();
+                            if (url) {
+                              mergeUrlIntoForm(url);
+                            } else if (form.connectionUrl !== undefined) {
+                              update("connectionUrl", undefined);
                             }
                           }}
                           placeholder={connectionStringPlaceholder}
