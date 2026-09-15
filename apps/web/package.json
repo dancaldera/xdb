@@ -1,6 +1,6 @@
 {
   "name": "@xdb/web",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "A local web database client for PostgreSQL, MySQL, and SQLite built with Node, React, and Vite.",
   "author": "Daniel Caldera",
   "homepage": "https://github.com/dancaldera/xdb",
