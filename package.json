@@ -1,6 +1,6 @@
 {
   "name": "xdb-workspace",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "private": true,
   "packageManager": "pnpm@12.4.1",
   "workspaces": [
