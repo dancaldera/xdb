@@ -1,13 +1,13 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { createServer } from "node:http";
 import { homedir } from "node:os";
 import { extname, join, normalize, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { DatabaseService } from "../main/database";
-import { AppStore } from "../main/store";
 import { StorageService } from "../main/storage";
+import { AppStore } from "../main/store";
 import { createApiHandlers } from "./api";
 
 const PORT = Number(process.env.XDB_PORT ?? 4595);
@@ -24,7 +24,10 @@ const api = createApiHandlers({ store, database, storage });
 
 const eventClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
 
-function broadcast(channel: "database:backup-progress" | "database:restore-progress", payload: unknown): void {
+function broadcast(
+  channel: "database:backup-progress" | "database:restore-progress" | "storage:transfer-progress",
+  payload: unknown
+): void {
   const encoded = new TextEncoder().encode(`data: ${JSON.stringify({ channel, payload })}\n\n`);
   for (const client of eventClients) {
     try {
@@ -166,6 +169,28 @@ export async function handle(request: Request): Promise<Response> {
 
   if (pathname === "/api/uploads" && request.method === "POST") {
     return handleUpload(request);
+  }
+
+  if (pathname === "/api/storage/download" && request.method === "GET") {
+    const profileId = url.searchParams.get("profileId") ?? "";
+    const key = url.searchParams.get("key") ?? "";
+    try {
+      const stream = await storage.openObjectStream(profileId, key);
+      const body = Readable.toWeb(stream.body) as unknown as ReadableStream<Uint8Array>;
+      const headers = new Headers({
+        "content-type": stream.contentType ?? "application/octet-stream",
+        "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(stream.fileName)}`
+      });
+      if (stream.contentLength !== null) {
+        headers.set("content-length", String(stream.contentLength));
+      }
+      return new Response(body, { headers });
+    } catch (error) {
+      return Response.json(
+        { ok: false, error: error instanceof Error ? error.message : String(error) },
+        { status: 400 }
+      );
+    }
   }
 
   if (pathname.startsWith("/api/ipc/")) {

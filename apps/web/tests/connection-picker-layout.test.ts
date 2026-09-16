@@ -2,12 +2,12 @@ import { describe, expect, test } from "vitest";
 import {
   applyConnectionPickerLayout,
   CONNECTION_PICKER_COLLAPSED_LEGACY_STORAGE_KEY,
+  type ConnectionGroupSectionLike,
   connectionGroupSectionKey,
   createDefaultLayout,
   reconcileConnectionPickerLayout,
   reorderIds,
-  UNGROUPED_SECTION_KEY,
-  type ConnectionGroupSectionLike
+  UNGROUPED_SECTION_KEY
 } from "../src/shared/connection-picker-layout";
 
 const GROUP_A = "group-a";

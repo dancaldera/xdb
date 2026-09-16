@@ -13,6 +13,7 @@ import type {
   StorageDeleteInput,
   StorageListInput,
   StorageMoveInput,
+  StorageTransferProgress,
   TableFilterInput,
   TableSortInput,
   UpdateRowInput,
@@ -255,35 +256,41 @@ const api: AppApi = {
   cancelRestore: (taskId: string) => invoke("database:restore-cancel", taskId),
   onRestoreProgress: (listener: (progress: DatabaseRestoreProgress) => void) =>
     subscribeToProgress<DatabaseRestoreProgress>("database:restore-progress", listener),
+  listStorageBuckets: (profileId: string) => invoke("storage:buckets", profileId),
+  selectStorageBucket: (profileId: string, bucket: string) => invoke("storage:select-bucket", profileId, bucket),
   listStorageObjects: (input: StorageListInput) => invoke("storage:objects", input),
   getStorageObjectMetadata: (profileId: string, key: string) => invoke("storage:metadata", profileId, key),
   previewStorageObject: (profileId: string, key: string) => invoke("storage:preview", profileId, key),
-  downloadStorageObject: (profileId: string, key: string) => invoke("storage:download", profileId, key),
-  uploadStorageFiles: async (profileId: string, prefix: string) => {
-    const files = await pickFiles({ multiple: true });
+  downloadStorageObject: async (profileId: string, key: string) => {
+    const params = new URLSearchParams({ profileId, key });
+    window.open(`/api/storage/download?${params.toString()}`, "_blank");
+    return null;
+  },
+  uploadStorageFiles: async (profileId: string, prefix: string, providedFiles?: File[], taskId?: string) => {
+    const files = providedFiles ?? (await pickFiles({ multiple: true }));
     if (files.length === 0) {
       return null;
     }
 
     const uploaded = await uploadFiles(files);
-    return invoke("storage:upload-files", profileId, prefix, uploaded.paths);
+    return invoke("storage:upload-files", profileId, prefix, uploaded.paths, taskId);
   },
-  uploadStorageFolder: async (profileId: string, prefix: string) => {
-    const files = await pickFiles({ directory: true, multiple: true });
+  uploadStorageFolder: async (profileId: string, prefix: string, providedFiles?: File[], taskId?: string) => {
+    const files = providedFiles ?? (await pickFiles({ directory: true, multiple: true }));
     if (files.length === 0) {
       return null;
     }
 
-    const first = files[0] as File & { webkitRelativePath?: string };
     const relativePaths = files.map((file) => {
       const relativeFile = file as File & { webkitRelativePath?: string };
       return relativeFile.webkitRelativePath ?? file.name;
     });
-    void first;
 
     const uploaded = await uploadFiles(files, relativePaths);
-    return invoke("storage:upload-folder", profileId, prefix, uploaded.root);
+    return invoke("storage:upload-folder", profileId, prefix, uploaded.root, taskId);
   },
+  onStorageTransferProgress: (listener: (progress: StorageTransferProgress) => void) =>
+    subscribeToProgress<StorageTransferProgress>("storage:transfer-progress", listener),
   createStorageFolder: (profileId: string, prefix: string, name: string) =>
     invoke("storage:create-folder", profileId, prefix, name),
   copyStorageObject: (input: StorageCopyInput) => invoke("storage:copy", input),

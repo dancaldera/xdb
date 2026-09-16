@@ -1,25 +1,25 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createConnectionArchive, createConnectionArchiveCopies } from "../shared/connection-archive";
+import { parseConnectionPickerLayout } from "../shared/connection-picker-layout";
 import type {
   AppSettings,
   AppSettingsInput,
+  ConnectionArchive,
+  ConnectionEngine,
   ConnectionGroup,
   ConnectionGroupInput,
   ConnectionInput,
-  ConnectionProfile,
-  ConnectionEngine,
   ConnectionKind,
-  ConnectionArchive,
   ConnectionPickerLayout,
+  ConnectionProfile,
   QueryHistoryItem,
   SavedSqlQuery,
   SavedSqlQueryInput,
   SqlEditorDraft
 } from "../shared/types";
-import { parseConnectionPickerLayout } from "../shared/connection-picker-layout";
-import { createConnectionArchive, createConnectionArchiveCopies } from "../shared/connection-archive";
 
 type StoredConnection = Omit<ConnectionProfile, "hasPassword" | "kind" | "engine"> & {
   kind?: ConnectionKind;

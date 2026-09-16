@@ -1,9 +1,9 @@
-import { describe, expect, test } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 import type pg from "pg";
+import { describe, expect, test } from "vitest";
 import { extractCopyTableName, isCustomFormatDump, restoreSqlFile } from "../src/main/postgres-restore";
 
 class FakeClient {

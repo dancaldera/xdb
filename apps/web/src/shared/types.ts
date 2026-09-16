@@ -220,6 +220,7 @@ export type QueryExecutionResult = {
   rowCount: number | null;
   command: string;
   durationMs: number;
+  truncated?: boolean;
   notice?: string;
 };
 
@@ -344,6 +345,12 @@ export type StorageListInput = {
   prefix?: string;
   continuationToken?: string;
   pageSize?: number;
+  filter?: string;
+};
+
+export type StorageBucket = {
+  name: string;
+  creationDate: string | null;
 };
 
 export type StorageListResult = {
@@ -365,10 +372,10 @@ export type StorageObjectMetadata = {
 
 export type StoragePreviewResult =
   | {
-      kind: "image";
+      kind: "image" | "video" | "audio" | "pdf";
       key: string;
       contentType: string;
-      dataUrl: string;
+      url: string;
       size: number | null;
     }
   | {
@@ -404,6 +411,15 @@ export type StorageDeleteInput = {
 export type StorageTransferResult = {
   uploaded: number;
   skipped: number;
+  failed?: number;
+};
+
+export type StorageTransferProgress = {
+  taskId: string;
+  phase: "uploading" | "done" | "failed";
+  done: number;
+  total: number;
+  current?: string;
 };
 
 export type StorageDownloadResult = {
@@ -453,12 +469,25 @@ export type AppApi = {
   restoreDatabase: (profileId: string, password?: string, taskId?: string) => Promise<DatabaseRestoreResult | null>;
   cancelRestore: (taskId: string) => Promise<void>;
   onRestoreProgress: (listener: (progress: DatabaseRestoreProgress) => void) => () => void;
+  listStorageBuckets: (profileId: string) => Promise<StorageBucket[]>;
+  selectStorageBucket: (profileId: string, bucket: string) => Promise<StorageStatus>;
   listStorageObjects: (input: StorageListInput) => Promise<StorageListResult>;
   getStorageObjectMetadata: (profileId: string, key: string) => Promise<StorageObjectMetadata>;
   previewStorageObject: (profileId: string, key: string) => Promise<StoragePreviewResult>;
   downloadStorageObject: (profileId: string, key: string) => Promise<StorageDownloadResult | null>;
-  uploadStorageFiles: (profileId: string, prefix: string) => Promise<StorageTransferResult | null>;
-  uploadStorageFolder: (profileId: string, prefix: string) => Promise<StorageTransferResult | null>;
+  uploadStorageFiles: (
+    profileId: string,
+    prefix: string,
+    files?: File[],
+    taskId?: string
+  ) => Promise<StorageTransferResult | null>;
+  uploadStorageFolder: (
+    profileId: string,
+    prefix: string,
+    files?: File[],
+    taskId?: string
+  ) => Promise<StorageTransferResult | null>;
+  onStorageTransferProgress: (listener: (progress: StorageTransferProgress) => void) => () => void;
   createStorageFolder: (profileId: string, prefix: string, name: string) => Promise<void>;
   copyStorageObject: (input: StorageCopyInput) => Promise<void>;
   moveStorageObject: (input: StorageMoveInput) => Promise<void>;

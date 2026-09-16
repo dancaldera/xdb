@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { DatabaseService } from "../main/database";
+import type { StorageService } from "../main/storage";
+import type { AppStore } from "../main/store";
+import { defaultDataDir } from "../main/store";
 import type {
   AppSettingsInput,
   ConnectionGroupInput,
@@ -20,12 +24,8 @@ import type {
   UpdateRowInput,
   UpsertRowInput
 } from "../shared/types";
-import type { DatabaseService } from "../main/database";
-import type { AppStore } from "../main/store";
-import { defaultDataDir } from "../main/store";
-import type { StorageService } from "../main/storage";
 
-type ProgressChannel = "database:backup-progress" | "database:restore-progress";
+type ProgressChannel = "database:backup-progress" | "database:restore-progress" | "storage:transfer-progress";
 
 export type ProgressEmitter = (channel: ProgressChannel, payload: unknown) => void;
 
@@ -221,6 +221,8 @@ export function createApiHandlers(input: {
     "database:restore-cancel": (taskId: string) => {
       restoreControllers.get(taskId)?.abort();
     },
+    "storage:buckets": (profileId: string) => storage.listBuckets(profileId),
+    "storage:select-bucket": (profileId: string, bucket: string) => storage.selectBucket(profileId, bucket),
     "storage:objects": (storageListInput: StorageListInput) => storage.listObjects(storageListInput),
     "storage:metadata": (profileId: string, key: string) => storage.getObjectMetadata(profileId, key),
     "storage:preview": (profileId: string, key: string) => storage.previewObject(profileId, key),
@@ -230,19 +232,25 @@ export function createApiHandlers(input: {
       const filePath = join(downloadsDir, `${randomUUID()}-${fileName}`);
       return storage.downloadObject(profileId, key, filePath);
     },
-    "storage:upload-files": async (profileId: string, prefix: string, filePaths?: string[]) => {
+    "storage:upload-files": async (profileId: string, prefix: string, filePaths?: string[], taskId?: string) => {
       if (!filePaths || filePaths.length === 0) {
         return null;
       }
 
-      return storage.uploadFiles(profileId, prefix, filePaths);
+      return storage.uploadFiles(profileId, prefix, filePaths, {
+        taskId,
+        onProgress: (progress) => emitProgress("storage:transfer-progress", { taskId, ...progress })
+      });
     },
-    "storage:upload-folder": async (profileId: string, prefix: string, folderPath?: string) => {
+    "storage:upload-folder": async (profileId: string, prefix: string, folderPath?: string, taskId?: string) => {
       if (!folderPath) {
         return null;
       }
 
-      return storage.uploadFolder(profileId, prefix, folderPath);
+      return storage.uploadFolder(profileId, prefix, folderPath, {
+        taskId,
+        onProgress: (progress) => emitProgress("storage:transfer-progress", { taskId, ...progress })
+      });
     },
     "storage:create-folder": (profileId: string, prefix: string, name: string) =>
       storage.createFolder(profileId, prefix, name),

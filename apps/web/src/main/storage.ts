@@ -1,24 +1,29 @@
+import { createReadStream, createWriteStream } from "node:fs";
+import { readdir, stat } from "node:fs/promises";
+import { basename, join, relative, sep } from "node:path";
+import type { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import {
+  type _Object,
+  type CommonPrefix,
   CopyObjectCommand,
   DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
+  ListBucketsCommand,
   ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
-  type _Object,
-  type CommonPrefix,
   type S3ClientConfig
 } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
-import { createReadStream, createWriteStream } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
-import { basename, join, relative, sep } from "node:path";
-import { pipeline } from "node:stream/promises";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { formatStorageBytes } from "../shared/format";
 import type {
   ConnectionProfile,
+  StorageBucket,
   StorageCopyInput,
   StorageDeleteInput,
   StorageListInput,
@@ -28,14 +33,20 @@ import type {
   StorageObjectMetadata,
   StoragePreviewResult,
   StorageStatus,
+  StorageTransferProgress,
   StorageTransferResult
 } from "../shared/types";
 import type { AppStore } from "./store";
 
 const DEFAULT_PAGE_SIZE = 100;
-const IMAGE_PREVIEW_LIMIT = 15 * 1024 * 1024;
+const MAX_DELETE_BATCH = 1000;
+const FILTER_SCAN_LIMIT = 10_000;
+const UPLOAD_CONCURRENCY = 6;
+const PREVIEW_URL_TTL_SECONDS = 3600;
 const TEXT_PREVIEW_LIMIT = 1024 * 1024;
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".avif"]);
+const VIDEO_EXTENSIONS = new Set([".mp4", ".webm", ".mov", ".m4v", ".ogv"]);
+const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac"]);
 const TEXT_EXTENSIONS = new Set([
   ".txt",
   ".md",
@@ -55,12 +66,22 @@ const TEXT_EXTENSIONS = new Set([
   ".html"
 ]);
 
-type S3ClientLike = Pick<S3Client, "send" | "destroy">;
-type S3ClientFactory = (profile: ConnectionProfile & { password: string }) => S3ClientLike;
+export type StoragePreviewKind = "image" | "video" | "audio" | "pdf" | "text" | "unsupported";
 
 type StorageEntry = {
-  client: S3ClientLike;
+  client: S3Client;
   profile: ConnectionProfile & { password: string };
+};
+
+type S3ClientFactory = (profile: ConnectionProfile & { password: string }) => S3Client;
+type PreviewUrlSigner = (entry: StorageEntry, key: string, contentType: string | null) => Promise<string>;
+type TransferProgressReporter = (progress: Omit<StorageTransferProgress, "taskId">) => void;
+
+export type StorageObjectStream = {
+  body: Readable;
+  contentType: string | null;
+  contentLength: number | null;
+  fileName: string;
 };
 
 export class StorageService {
@@ -68,7 +89,8 @@ export class StorageService {
 
   constructor(
     private readonly store: AppStore,
-    private readonly createClient: S3ClientFactory = createS3Client
+    private readonly createClient: S3ClientFactory = createS3Client,
+    private readonly signPreviewUrl: PreviewUrlSigner = defaultPreviewUrlSigner
   ) {}
 
   async connect(profileId: string, password?: string): Promise<StorageStatus> {
@@ -103,12 +125,42 @@ export class StorageService {
     this.connections.clear();
   }
 
+  async listBuckets(profileId: string): Promise<StorageBucket[]> {
+    const { client } = this.getEntry(profileId);
+    const result = await client.send(new ListBucketsCommand({}));
+    return (result.Buckets ?? [])
+      .map((bucket) => ({
+        name: bucket.Name ?? "",
+        creationDate: bucket.CreationDate?.toISOString() ?? null
+      }))
+      .filter((bucket) => bucket.name)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async selectBucket(profileId: string, bucket: string): Promise<StorageStatus> {
+    const entry = this.getEntry(profileId);
+    const name = bucket.trim();
+    if (!name) {
+      throw new Error("Bucket name is required.");
+    }
+
+    await entry.client.send(new HeadBucketCommand({ Bucket: name }));
+    entry.profile = { ...entry.profile, bucket: name, rootPrefix: "" };
+    return createStorageStatus(entry.profile);
+  }
+
   async listObjects(input: StorageListInput): Promise<StorageListResult> {
     const { client, profile } = this.getEntry(input.profileId);
     const rootPrefix = profile.rootPrefix ?? "";
     const relativePrefix = normalizeStoragePrefix(input.prefix);
     const absolutePrefix = joinStorageKey(rootPrefix, relativePrefix);
     const pageSize = Math.min(1000, Math.max(10, input.pageSize ?? DEFAULT_PAGE_SIZE));
+    const filter = input.filter?.trim().toLowerCase() ?? "";
+
+    if (filter) {
+      return this.searchObjects(client, profile, absolutePrefix, relativePrefix, filter, pageSize);
+    }
+
     const result = await client.send(
       new ListObjectsV2Command({
         Bucket: requiredBucket(profile),
@@ -133,6 +185,65 @@ export class StorageService {
     };
   }
 
+  private async searchObjects(
+    client: S3Client,
+    profile: ConnectionProfile & { password: string },
+    absolutePrefix: string,
+    relativePrefix: string,
+    filter: string,
+    pageSize: number
+  ): Promise<StorageListResult> {
+    const rootPrefix = profile.rootPrefix ?? "";
+    const objects: StorageObject[] = [];
+    let continuationToken: string | undefined;
+    let scanned = 0;
+    let truncated = false;
+
+    do {
+      const result = await client.send(
+        new ListObjectsV2Command({
+          Bucket: requiredBucket(profile),
+          Prefix: absolutePrefix,
+          ContinuationToken: continuationToken,
+          MaxKeys: 1000
+        })
+      );
+
+      for (const object of result.Contents ?? []) {
+        scanned += 1;
+        if (!object.Key || object.Key === absolutePrefix) {
+          continue;
+        }
+
+        const relativeKey = stripRootPrefix(object.Key, rootPrefix);
+        if (!relativeKey.toLowerCase().includes(filter)) {
+          continue;
+        }
+
+        objects.push(s3ObjectToStorageObject(object, rootPrefix));
+        if (objects.length >= pageSize) {
+          truncated = true;
+          break;
+        }
+      }
+
+      continuationToken = result.NextContinuationToken ?? undefined;
+      if (truncated || scanned >= FILTER_SCAN_LIMIT) {
+        truncated = true;
+        break;
+      }
+    } while (continuationToken);
+
+    objects.sort(compareStorageObjects);
+    return {
+      bucket: requiredBucket(profile),
+      prefix: relativePrefix,
+      objects,
+      nextContinuationToken: null,
+      isTruncated: truncated
+    };
+  }
+
   async getObjectMetadata(profileId: string, key: string): Promise<StorageObjectMetadata> {
     const { client, profile } = this.getEntry(profileId);
     const absoluteKey = absoluteStorageKey(profile, key);
@@ -148,49 +259,52 @@ export class StorageService {
   }
 
   async previewObject(profileId: string, key: string): Promise<StoragePreviewResult> {
+    const entry = this.getEntry(profileId);
     const metadata = await this.getObjectMetadata(profileId, key);
     const kind = classifyPreview(key, metadata.contentType);
-    const size = metadata.size ?? 0;
-
-    if (kind === "image" && size > IMAGE_PREVIEW_LIMIT) {
-      return unsupportedPreview(key, metadata, "Image is too large to preview.");
-    }
-
-    if (kind === "text" && size > TEXT_PREVIEW_LIMIT) {
-      const text = await this.readObjectBytes(profileId, key, TEXT_PREVIEW_LIMIT);
-      return {
-        kind: "text",
-        key,
-        contentType: metadata.contentType ?? "text/plain",
-        text: text.toString("utf8"),
-        truncated: true,
-        size: metadata.size
-      };
-    }
 
     if (kind === "unsupported") {
       return unsupportedPreview(key, metadata, "This file type is not supported for preview.");
     }
 
-    const bytes = await this.readObjectBytes(profileId, key);
-    if (kind === "image") {
-      const contentType = metadata.contentType || imageContentTypeFromKey(key);
+    if (kind === "text") {
+      const truncated = (metadata.size ?? 0) > TEXT_PREVIEW_LIMIT;
+      const bytes = await this.readObjectBytes(profileId, key, truncated ? TEXT_PREVIEW_LIMIT : undefined);
       return {
-        kind: "image",
+        kind: "text",
         key,
-        contentType,
-        dataUrl: `data:${contentType};base64,${bytes.toString("base64")}`,
+        contentType: metadata.contentType ?? "text/plain",
+        text: bytes.toString("utf8"),
+        truncated,
         size: metadata.size
       };
     }
 
+    const url = await this.signPreviewUrl(entry, absoluteStorageKey(entry.profile, key), metadata.contentType);
     return {
-      kind: "text",
+      kind,
       key,
-      contentType: metadata.contentType ?? "text/plain",
-      text: bytes.toString("utf8"),
-      truncated: false,
+      contentType: metadata.contentType ?? defaultContentTypeForKind(kind, key),
+      url,
       size: metadata.size
+    };
+  }
+
+  async openObjectStream(profileId: string, key: string): Promise<StorageObjectStream> {
+    const { client, profile } = this.getEntry(profileId);
+    const result = await client.send(
+      new GetObjectCommand({ Bucket: requiredBucket(profile), Key: absoluteStorageKey(profile, key) })
+    );
+
+    if (!result.Body) {
+      throw new Error("S3 object response did not include a body.");
+    }
+
+    return {
+      body: result.Body as Readable,
+      contentType: result.ContentType ?? null,
+      contentLength: result.ContentLength ?? null,
+      fileName: storageBasename(key)
     };
   }
 
@@ -208,35 +322,82 @@ export class StorageService {
     return { filePath };
   }
 
-  async uploadFiles(profileId: string, prefix: string, filePaths: string[]): Promise<StorageTransferResult> {
+  async uploadFiles(
+    profileId: string,
+    prefix: string,
+    filePaths: string[],
+    options: { taskId?: string; onProgress?: TransferProgressReporter } = {}
+  ): Promise<StorageTransferResult> {
     const { client, profile } = this.getEntry(profileId);
-    let uploaded = 0;
+    const candidates: Array<{ filePath: string; key: string }> = [];
+    let skipped = 0;
 
     for (const filePath of filePaths) {
-      const fileStats = await stat(filePath);
-      if (!fileStats.isFile()) {
+      const fileStats = await stat(filePath).catch(() => null);
+      if (!fileStats?.isFile()) {
+        skipped += 1;
         continue;
       }
-
-      await this.uploadFile(client, profile, joinStorageKey(prefix, basename(filePath)), filePath);
-      uploaded += 1;
+      candidates.push({ filePath, key: joinStorageKey(prefix, basename(filePath)) });
     }
 
-    return { uploaded, skipped: filePaths.length - uploaded };
+    const result = await this.uploadEntries(client, profile, candidates, options);
+    return { uploaded: result.uploaded, skipped, failed: result.failed };
   }
 
-  async uploadFolder(profileId: string, prefix: string, folderPath: string): Promise<StorageTransferResult> {
+  async uploadFolder(
+    profileId: string,
+    prefix: string,
+    folderPath: string,
+    options: { taskId?: string; onProgress?: TransferProgressReporter } = {}
+  ): Promise<StorageTransferResult> {
     const { client, profile } = this.getEntry(profileId);
     const files = await listLocalFiles(folderPath);
+    const candidates = files.map((filePath) => ({
+      filePath,
+      key: joinStorageKey(prefix, relative(folderPath, filePath).split(sep).join("/"))
+    }));
+
+    const result = await this.uploadEntries(client, profile, candidates, options);
+    return { uploaded: result.uploaded, skipped: 0, failed: result.failed };
+  }
+
+  private async uploadEntries(
+    client: S3Client,
+    profile: ConnectionProfile & { password: string },
+    candidates: Array<{ filePath: string; key: string }>,
+    options: { taskId?: string; onProgress?: TransferProgressReporter }
+  ): Promise<{ uploaded: number; failed: number }> {
+    const total = candidates.length;
     let uploaded = 0;
+    let failed = 0;
+    let nextIndex = 0;
 
-    for (const filePath of files) {
-      const relativePath = relative(folderPath, filePath).split(sep).join("/");
-      await this.uploadFile(client, profile, joinStorageKey(prefix, relativePath), filePath);
-      uploaded += 1;
-    }
+    const worker = async (): Promise<void> => {
+      while (nextIndex < total) {
+        const candidate = candidates[nextIndex];
+        nextIndex += 1;
+        options.onProgress?.({ phase: "uploading", done: uploaded + failed, total, current: candidate.key });
+        try {
+          const upload = new Upload({
+            client,
+            params: {
+              Bucket: requiredBucket(profile),
+              Key: absoluteStorageKey(profile, candidate.key),
+              Body: createReadStream(candidate.filePath)
+            }
+          });
+          await upload.done();
+          uploaded += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+    };
 
-    return { uploaded, skipped: 0 };
+    await Promise.all(Array.from({ length: Math.min(UPLOAD_CONCURRENCY, total) }, () => worker()));
+    options.onProgress?.({ phase: failed === total && total > 0 ? "failed" : "done", done: total, total });
+    return { uploaded, failed };
   }
 
   async createFolder(profileId: string, prefix: string, name: string): Promise<void> {
@@ -248,6 +409,12 @@ export class StorageService {
 
   async copyObject(input: StorageCopyInput): Promise<void> {
     const { client, profile } = this.getEntry(input.profileId);
+
+    if (input.sourceKey.endsWith("/")) {
+      await this.copyFolder(client, profile, input);
+      return;
+    }
+
     const sourceKey = absoluteStorageKey(profile, input.sourceKey);
     const destinationKey = absoluteStorageKey(profile, input.destinationKey);
 
@@ -255,6 +422,47 @@ export class StorageService {
       await assertObjectDoesNotExist(client, profile, destinationKey);
     }
 
+    await this.copyAbsoluteKey(client, profile, sourceKey, destinationKey);
+  }
+
+  private async copyFolder(
+    client: S3Client,
+    profile: ConnectionProfile & { password: string },
+    input: StorageCopyInput
+  ): Promise<void> {
+    const sourcePrefix = absoluteStorageKey(profile, input.sourceKey);
+    const destinationPrefix = absoluteStorageKey(
+      profile,
+      input.destinationKey.endsWith("/") ? input.destinationKey : `${input.destinationKey}/`
+    );
+
+    const sourceKeys = await this.listAllKeys(client, profile, sourcePrefix);
+    if (sourceKeys.length === 0) {
+      await client.send(new PutObjectCommand({ Bucket: requiredBucket(profile), Key: destinationPrefix, Body: "" }));
+      return;
+    }
+
+    if (!input.overwrite) {
+      const existing = await client.send(
+        new ListObjectsV2Command({ Bucket: requiredBucket(profile), Prefix: destinationPrefix, MaxKeys: 1 })
+      );
+      if ((existing.Contents ?? []).length > 0 || (existing.CommonPrefixes ?? []).length > 0) {
+        throw new Error("Destination folder already exists.");
+      }
+    }
+
+    for (const absoluteSourceKey of sourceKeys) {
+      const destinationKey = destinationPrefix + absoluteSourceKey.slice(sourcePrefix.length);
+      await this.copyAbsoluteKey(client, profile, absoluteSourceKey, destinationKey);
+    }
+  }
+
+  private async copyAbsoluteKey(
+    client: S3Client,
+    profile: ConnectionProfile & { password: string },
+    sourceKey: string,
+    destinationKey: string
+  ): Promise<void> {
     await client.send(
       new CopyObjectCommand({
         Bucket: requiredBucket(profile),
@@ -265,51 +473,88 @@ export class StorageService {
   }
 
   async moveObject(input: StorageMoveInput): Promise<void> {
-    if (input.destinationKey.endsWith("/")) {
+    const isFolder = input.sourceKey.endsWith("/");
+    if (!isFolder && input.destinationKey.endsWith("/")) {
       throw new Error("Move destination must be a file key.");
     }
 
     await this.copyObject(input);
-    await this.deleteObjects({ profileId: input.profileId, keys: [input.sourceKey] });
+
+    const { client, profile } = this.getEntry(input.profileId);
+    const sourceKeys = isFolder
+      ? await this.listAllKeys(client, profile, absoluteStorageKey(profile, input.sourceKey))
+      : [absoluteStorageKey(profile, input.sourceKey)];
+    await this.deleteAbsoluteKeys(client, profile, sourceKeys);
   }
 
   async deleteObjects(input: StorageDeleteInput): Promise<void> {
     const { client, profile } = this.getEntry(input.profileId);
-    const keys = input.keys.map((key) => absoluteStorageKey(profile, key));
-    if (keys.length === 0) {
+    if (input.keys.length === 0) {
       return;
     }
 
+    const absoluteKeys = new Set<string>();
+    for (const key of input.keys) {
+      const absoluteKey = absoluteStorageKey(profile, key);
+      if (key.endsWith("/")) {
+        for (const childKey of await this.listAllKeys(client, profile, absoluteKey)) {
+          absoluteKeys.add(childKey);
+        }
+      }
+      absoluteKeys.add(absoluteKey);
+    }
+
+    await this.deleteAbsoluteKeys(client, profile, [...absoluteKeys]);
+  }
+
+  private async deleteAbsoluteKeys(
+    client: S3Client,
+    profile: ConnectionProfile & { password: string },
+    keys: string[]
+  ): Promise<void> {
     if (keys.length === 1) {
       await client.send(new DeleteObjectCommand({ Bucket: requiredBucket(profile), Key: keys[0] }));
       return;
     }
 
-    await client.send(
-      new DeleteObjectsCommand({
-        Bucket: requiredBucket(profile),
-        Delete: {
-          Objects: keys.map((key) => ({ Key: key }))
-        }
-      })
-    );
+    for (let index = 0; index < keys.length; index += MAX_DELETE_BATCH) {
+      const batch = keys.slice(index, index + MAX_DELETE_BATCH);
+      await client.send(
+        new DeleteObjectsCommand({
+          Bucket: requiredBucket(profile),
+          Delete: { Objects: batch.map((key) => ({ Key: key })) }
+        })
+      );
+    }
   }
 
-  private async uploadFile(
-    client: S3ClientLike,
+  private async listAllKeys(
+    client: S3Client,
     profile: ConnectionProfile & { password: string },
-    relativeKey: string,
-    filePath: string
-  ): Promise<void> {
-    const upload = new Upload({
-      client: client as S3Client,
-      params: {
-        Bucket: requiredBucket(profile),
-        Key: absoluteStorageKey(profile, relativeKey),
-        Body: createReadStream(filePath)
+    absolutePrefix: string
+  ): Promise<string[]> {
+    const keys: string[] = [];
+    let continuationToken: string | undefined;
+
+    do {
+      const result = await client.send(
+        new ListObjectsV2Command({
+          Bucket: requiredBucket(profile),
+          Prefix: absolutePrefix,
+          ContinuationToken: continuationToken,
+          MaxKeys: 1000
+        })
+      );
+
+      for (const object of result.Contents ?? []) {
+        if (object.Key) {
+          keys.push(object.Key);
+        }
       }
-    });
-    await upload.done();
+      continuationToken = result.NextContinuationToken ?? undefined;
+    } while (continuationToken);
+
+    return keys;
   }
 
   private async readObjectBytes(profileId: string, key: string, maxBytes?: number): Promise<Buffer> {
@@ -382,6 +627,19 @@ function createS3Client(profile: ConnectionProfile & { password: string }): S3Cl
   return new S3Client(config);
 }
 
+function defaultPreviewUrlSigner(entry: StorageEntry, key: string, contentType: string | null): Promise<string> {
+  return getSignedUrl(
+    entry.client,
+    new GetObjectCommand({
+      Bucket: requiredBucket(entry.profile),
+      Key: key,
+      ResponseContentType: contentType ?? undefined,
+      ResponseContentDisposition: "inline"
+    }),
+    { expiresIn: PREVIEW_URL_TTL_SECONDS }
+  );
+}
+
 function createStorageStatus(profile: ConnectionProfile & { password: string }): StorageStatus {
   return {
     profileId: profile.id,
@@ -422,12 +680,24 @@ export function storageBasename(key: string): string {
   return trimmed.split("/").pop() || trimmed || "/";
 }
 
-export function classifyPreview(key: string, contentType: string | null | undefined): "image" | "text" | "unsupported" {
+export function classifyPreview(key: string, contentType: string | null | undefined): StoragePreviewKind {
   const normalizedType = contentType?.toLowerCase() ?? "";
   const extension = extensionForKey(key);
 
   if (normalizedType.startsWith("image/") || IMAGE_EXTENSIONS.has(extension)) {
     return "image";
+  }
+
+  if (normalizedType.startsWith("video/") || VIDEO_EXTENSIONS.has(extension)) {
+    return "video";
+  }
+
+  if (normalizedType.startsWith("audio/") || AUDIO_EXTENSIONS.has(extension)) {
+    return "audio";
+  }
+
+  if (normalizedType === "application/pdf" || extension === ".pdf") {
+    return "pdf";
   }
 
   if (
@@ -441,25 +711,7 @@ export function classifyPreview(key: string, contentType: string | null | undefi
   return "unsupported";
 }
 
-export function formatStorageBytes(value: number | null): string {
-  if (value === null) {
-    return "";
-  }
-
-  if (value < 1024) {
-    return `${value} B`;
-  }
-
-  const units = ["KB", "MB", "GB", "TB"];
-  let amount = value / 1024;
-  let unitIndex = 0;
-  while (amount >= 1024 && unitIndex < units.length - 1) {
-    amount /= 1024;
-    unitIndex += 1;
-  }
-
-  return `${amount >= 10 ? amount.toFixed(1) : amount.toFixed(2)} ${units[unitIndex]}`;
-}
+export { formatStorageBytes };
 
 function absoluteStorageKey(profile: ConnectionProfile, key: string): string {
   return joinStorageKey(profile.rootPrefix, key);
@@ -531,6 +783,19 @@ function unsupportedPreview(
   };
 }
 
+function defaultContentTypeForKind(kind: StoragePreviewKind, key: string): string {
+  if (kind === "pdf") {
+    return "application/pdf";
+  }
+  if (kind === "video") {
+    return `video/${extensionForKey(key).replace(/^\./, "") || "mp4"}`;
+  }
+  if (kind === "audio") {
+    return `audio/${extensionForKey(key).replace(/^\./, "") || "mpeg"}`;
+  }
+  return imageContentTypeFromKey(key);
+}
+
 function imageContentTypeFromKey(key: string): string {
   const extension = extensionForKey(key);
   if (extension === ".svg") {
@@ -594,7 +859,7 @@ function encodeS3CopySourceKey(key: string): string {
 }
 
 async function assertObjectDoesNotExist(
-  client: S3ClientLike,
+  client: S3Client,
   profile: ConnectionProfile & { password: string },
   key: string
 ): Promise<void> {

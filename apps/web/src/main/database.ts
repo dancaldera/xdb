@@ -1,23 +1,24 @@
+import { randomUUID } from "node:crypto";
+import { rm } from "node:fs/promises";
+import { basename, extname, join } from "node:path";
 import {
   createClient,
   type Client as TursoClient,
   type ResultSet as TursoResultSet
 } from "@tursodatabase/serverless/compat";
-import pg from "pg";
 import Database from "better-sqlite3";
 import mysql from "mysql2/promise";
-import { randomUUID } from "node:crypto";
-import { rm } from "node:fs/promises";
-import { basename, extname, join } from "node:path";
+import pg from "pg";
+import { normalizeConnectionInput } from "../shared/connections";
 import type {
   ConnectionInput,
   ConnectionProfile,
   ConnectionStatus,
+  DatabaseBackupProgress,
   DatabaseBackupResult,
   DatabaseEngine,
   DatabaseInfo,
   DatabaseObject,
-  DatabaseBackupProgress,
   DatabaseRestoreProgress,
   DatabaseRestoreResult,
   DeleteRowInput,
@@ -26,13 +27,14 @@ import type {
   TableColumn,
   TableDataResult,
   TableFilterInput,
-  TableSortInput,
   TableIndex,
+  TableSortInput,
   TableStructure,
   UpdateRowInput,
   UpsertRowInput
 } from "../shared/types";
-import { normalizeConnectionInput } from "../shared/connections";
+import { createSqlDump } from "./postgres-dump";
+import { isCustomFormatDump, restoreSqlFile } from "./postgres-restore";
 import {
   buildCreateDatabaseSql,
   buildDeleteSql,
@@ -45,8 +47,6 @@ import {
   quoteIdentifier
 } from "./sql";
 import type { AppStore } from "./store";
-import { createSqlDump } from "./postgres-dump";
-import { isCustomFormatDump, restoreSqlFile } from "./postgres-restore";
 
 const { Pool } = pg;
 
@@ -98,6 +98,86 @@ type DatabaseAdapter = {
   updateRow(input: UpdateRowInput): Promise<void>;
   deleteRow(input: DeleteRowInput): Promise<void>;
 };
+
+const TABLE_DATA_CACHE_TTL_MS = 30_000;
+const MAX_QUERY_RESULT_ROWS = 5_000;
+
+type TableDataCacheEntry = {
+  structure: TableStructure;
+  counts: Map<string, number>;
+  expiresAt: number;
+};
+
+class TableDataCache {
+  private readonly entries = new Map<string, TableDataCacheEntry>();
+
+  private key(profileId: string, schema: string, table: string): string {
+    return `${profileId}${schema}${table}`;
+  }
+
+  async structure(
+    profileId: string,
+    schema: string,
+    table: string,
+    load: () => Promise<TableStructure>
+  ): Promise<TableStructure> {
+    const key = this.key(profileId, schema, table);
+    const cached = this.entries.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.structure;
+    }
+
+    const structure = await load();
+    this.entries.set(key, {
+      structure,
+      counts: new Map(),
+      expiresAt: Date.now() + TABLE_DATA_CACHE_TTL_MS
+    });
+    return structure;
+  }
+
+  count(profileId: string, schema: string, table: string, filters?: TableFilterInput): number | undefined {
+    const cached = this.entries.get(this.key(profileId, schema, table));
+    if (!cached || cached.expiresAt <= Date.now()) {
+      return undefined;
+    }
+
+    return cached.counts.get(JSON.stringify(filters ?? null));
+  }
+
+  setCount(
+    profileId: string,
+    schema: string,
+    table: string,
+    filters: TableFilterInput | undefined,
+    count: number
+  ): void {
+    const cached = this.entries.get(this.key(profileId, schema, table));
+    if (cached && cached.expiresAt > Date.now()) {
+      cached.counts.set(JSON.stringify(filters ?? null), count);
+    }
+  }
+
+  invalidateProfile(profileId: string): void {
+    for (const key of [...this.entries.keys()]) {
+      if (key.startsWith(`${profileId}`)) {
+        this.entries.delete(key);
+      }
+    }
+  }
+}
+
+function capQueryResultRows(result: QueryExecutionResult): QueryExecutionResult {
+  if (result.rows.length <= MAX_QUERY_RESULT_ROWS) {
+    return result;
+  }
+
+  return {
+    ...result,
+    rows: result.rows.slice(0, MAX_QUERY_RESULT_ROWS),
+    truncated: true
+  };
+}
 
 export class DatabaseService {
   private readonly adapters: Record<DatabaseEngine, DatabaseAdapter>;
@@ -182,7 +262,8 @@ export class DatabaseService {
   }
 
   async executeQuery(profileId: string, sql: string): Promise<QueryExecutionResult> {
-    return (await this.getAdapterForProfile(profileId)).executeQuery(profileId, sql);
+    const result = await (await this.getAdapterForProfile(profileId)).executeQuery(profileId, sql);
+    return capQueryResultRows(result);
   }
 
   async insertRow(input: UpsertRowInput): Promise<void> {
@@ -246,6 +327,7 @@ export class DatabaseService {
 export class PostgresService {
   readonly engine = "postgresql" as const;
   private readonly pools = new Map<string, PoolEntry>();
+  private readonly tableDataCache = new TableDataCache();
 
   constructor(private readonly store: AppStore) {}
 
@@ -264,6 +346,7 @@ export class PostgresService {
 
     const { pool, profile: connectedProfile, status } = await this.createConnectedPool(profile);
     this.pools.set(profileId, { pool, profile: connectedProfile });
+    this.tableDataCache.invalidateProfile(profileId);
     return status;
   }
 
@@ -391,7 +474,9 @@ export class PostgresService {
     const safePageSize = Math.min(Math.max(pageSize, 10), 500);
     const offset = (safePage - 1) * safePageSize;
     const pool = this.getPool(profileId);
-    const structure = await this.getTableStructure(profileId, schema, table);
+    const structure = await this.tableDataCache.structure(profileId, schema, table, () =>
+      this.getTableStructure(profileId, schema, table)
+    );
     const countStatement = buildFilteredCountTableSql(this.engine, schema, table, structure.columns, filters);
     const rowsStatement = buildFilteredSelectTableSql(
       this.engine,
@@ -403,27 +488,17 @@ export class PostgresService {
       offset,
       sort
     );
-    const startedAt = performance.now();
+    const cachedTotal = this.tableDataCache.count(profileId, schema, table, filters);
     const [countResult, rowsResult] = await Promise.all([
-      pool.query<{ count: number }>(countStatement.sql, countStatement.params),
+      cachedTotal === undefined
+        ? pool.query<{ count: number }>(countStatement.sql, countStatement.params)
+        : Promise.resolve(null),
       pool.query<Record<string, unknown>>(rowsStatement.sql, rowsStatement.params)
     ]);
-    const durationMs = Math.round(performance.now() - startedAt);
-
-    await this.store.addHistory(
-      this.createHistoryItem(
-        profileId,
-        formatSqlStatementForHistory(rowsStatement, this.engine),
-        {
-          rows: [],
-          fields: [],
-          rowCount: rowsResult.rows.length,
-          command: "SELECT",
-          durationMs
-        },
-        { source: "table-data", target: { schema, table, action: "select" } }
-      )
-    );
+    const totalRows = cachedTotal ?? Number(countResult?.rows[0]?.count ?? 0);
+    if (cachedTotal === undefined) {
+      this.tableDataCache.setCount(profileId, schema, table, filters, totalRows);
+    }
 
     return {
       schema,
@@ -431,7 +506,7 @@ export class PostgresService {
       rows: rowsResult.rows,
       columns: structure.columns,
       primaryKeys: structure.primaryKeys,
-      totalRows: Number(countResult.rows[0]?.count ?? 0),
+      totalRows,
       page: safePage,
       pageSize: safePageSize
     };
@@ -442,6 +517,7 @@ export class PostgresService {
       throw new Error("Query cannot be empty.");
     }
 
+    this.tableDataCache.invalidateProfile(profileId);
     const pool = this.getPool(profileId);
     const startedAt = performance.now();
     const rawResult = await pool.query(sql);
@@ -466,6 +542,7 @@ export class PostgresService {
   }
 
   async insertRow(input: UpsertRowInput): Promise<void> {
+    this.tableDataCache.invalidateProfile(input.profileId);
     const pool = this.getPool(input.profileId);
     const statement = buildInsertSql(this.engine, input.schema, input.table, input.values);
     const startedAt = performance.now();
@@ -487,6 +564,7 @@ export class PostgresService {
   }
 
   async updateRow(input: UpdateRowInput): Promise<void> {
+    this.tableDataCache.invalidateProfile(input.profileId);
     const pool = this.getPool(input.profileId);
     const statement = buildUpdateSql(this.engine, input.schema, input.table, input.key, input.values);
     const startedAt = performance.now();
@@ -508,6 +586,7 @@ export class PostgresService {
   }
 
   async deleteRow(input: DeleteRowInput): Promise<void> {
+    this.tableDataCache.invalidateProfile(input.profileId);
     const pool = this.getPool(input.profileId);
     const statement = buildDeleteSql(this.engine, input.schema, input.table, input.key);
     const startedAt = performance.now();
@@ -920,6 +999,7 @@ type MysqlPoolEntry = {
 export class MysqlService implements DatabaseAdapter {
   readonly engine = "mysql" as const;
   private readonly pools = new Map<string, MysqlPoolEntry>();
+  private readonly tableDataCache = new TableDataCache();
 
   constructor(private readonly store: AppStore) {}
 
@@ -934,6 +1014,7 @@ export class MysqlService implements DatabaseAdapter {
 
     const { pool, status } = await this.createConnectedPool(profile);
     this.pools.set(profileId, { pool, profile });
+    this.tableDataCache.invalidateProfile(profileId);
     return status;
   }
 
@@ -1010,7 +1091,9 @@ export class MysqlService implements DatabaseAdapter {
     const safePageSize = Math.min(Math.max(pageSize, 10), 500);
     const offset = (safePage - 1) * safePageSize;
     const { pool } = this.getEntry(profileId);
-    const structure = await this.getTableStructure(profileId, schema, table);
+    const structure = await this.tableDataCache.structure(profileId, schema, table, () =>
+      this.getTableStructure(profileId, schema, table)
+    );
     const countStatement = buildFilteredCountTableSql(this.engine, schema, table, structure.columns, filters);
     const rowsStatement = buildFilteredSelectTableSql(
       this.engine,
@@ -1022,28 +1105,18 @@ export class MysqlService implements DatabaseAdapter {
       offset,
       sort
     );
-    const startedAt = performance.now();
+    const cachedTotal = this.tableDataCache.count(profileId, schema, table, filters);
     const [[countRow], [rows]] = await Promise.all([
-      pool.query<mysql.RowDataPacket[]>(countStatement.sql, countStatement.params),
+      cachedTotal === undefined
+        ? pool.query<mysql.RowDataPacket[]>(countStatement.sql, countStatement.params)
+        : Promise.resolve([[] as mysql.RowDataPacket[]]),
       pool.query<mysql.RowDataPacket[]>(rowsStatement.sql, rowsStatement.params)
     ]);
     const rowArray = rows.map((row) => ({ ...row }));
-    const durationMs = Math.round(performance.now() - startedAt);
-
-    await this.store.addHistory(
-      this.createHistoryItem(
-        profileId,
-        formatSqlStatementForHistory(rowsStatement, this.engine),
-        {
-          rows: [],
-          fields: [],
-          rowCount: rowArray.length,
-          command: "SELECT",
-          durationMs
-        },
-        { source: "table-data", target: { schema, table, action: "select" } }
-      )
-    );
+    const totalRows = cachedTotal ?? Number(countRow[0]?.count ?? 0);
+    if (cachedTotal === undefined) {
+      this.tableDataCache.setCount(profileId, schema, table, filters, totalRows);
+    }
 
     return {
       schema,
@@ -1051,7 +1124,7 @@ export class MysqlService implements DatabaseAdapter {
       rows: rowArray,
       columns: structure.columns,
       primaryKeys: structure.primaryKeys,
-      totalRows: Number(countRow[0]?.count ?? 0),
+      totalRows,
       page: safePage,
       pageSize: safePageSize
     };
@@ -1062,6 +1135,7 @@ export class MysqlService implements DatabaseAdapter {
       throw new Error("Query cannot be empty.");
     }
 
+    this.tableDataCache.invalidateProfile(profileId);
     const { pool } = this.getEntry(profileId);
     const startedAt = performance.now();
     const [rows, fields] = await pool.query(sql);
@@ -1086,6 +1160,7 @@ export class MysqlService implements DatabaseAdapter {
   }
 
   async insertRow(input: UpsertRowInput): Promise<void> {
+    this.tableDataCache.invalidateProfile(input.profileId);
     const { pool } = this.getEntry(input.profileId);
     const statement = buildInsertSql(this.engine, input.schema, input.table, input.values);
     const startedAt = performance.now();
@@ -1108,6 +1183,7 @@ export class MysqlService implements DatabaseAdapter {
   }
 
   async updateRow(input: UpdateRowInput): Promise<void> {
+    this.tableDataCache.invalidateProfile(input.profileId);
     const { pool } = this.getEntry(input.profileId);
     const statement = buildUpdateSql(this.engine, input.schema, input.table, input.key, input.values);
     const startedAt = performance.now();
@@ -1130,6 +1206,7 @@ export class MysqlService implements DatabaseAdapter {
   }
 
   async deleteRow(input: DeleteRowInput): Promise<void> {
+    this.tableDataCache.invalidateProfile(input.profileId);
     const { pool } = this.getEntry(input.profileId);
     const statement = buildDeleteSql(this.engine, input.schema, input.table, input.key);
     const startedAt = performance.now();
@@ -1360,6 +1437,7 @@ type SqliteEntry = {
 export class SqliteService implements DatabaseAdapter {
   readonly engine = "sqlite" as const;
   private readonly connections = new Map<string, SqliteEntry>();
+  private readonly tableDataCache = new TableDataCache();
 
   constructor(private readonly store: AppStore) {}
 
@@ -1379,6 +1457,7 @@ export class SqliteService implements DatabaseAdapter {
     const db = new Database(profile.filePath, { timeout: 10_000 });
     db.pragma("foreign_keys = ON");
     this.connections.set(profileId, { db, profile });
+    this.tableDataCache.invalidateProfile(profileId);
     return this.readConnectionStatus(db, profile);
   }
 
@@ -1454,7 +1533,9 @@ export class SqliteService implements DatabaseAdapter {
     const safePageSize = Math.min(Math.max(pageSize, 10), 500);
     const offset = (safePage - 1) * safePageSize;
     const { db } = this.getEntry(profileId);
-    const structure = await this.getTableStructure(profileId, schema, table);
+    const structure = await this.tableDataCache.structure(profileId, schema, table, () =>
+      this.getTableStructure(profileId, schema, table)
+    );
     const countStatement = buildFilteredCountTableSql(this.engine, schema, table, structure.columns, filters);
     const rowsStatement = buildFilteredSelectTableSql(
       this.engine,
@@ -1466,27 +1547,17 @@ export class SqliteService implements DatabaseAdapter {
       offset,
       sort
     );
-    const startedAt = performance.now();
-    const countRow = db.prepare(countStatement.sql).get(...(countStatement.params as never[])) as
-      | { count?: number }
-      | undefined;
+    const cachedTotal = this.tableDataCache.count(profileId, schema, table, filters);
+    const totalRows =
+      cachedTotal ??
+      Number(
+        (db.prepare(countStatement.sql).get(...(countStatement.params as never[])) as { count?: number } | undefined)
+          ?.count ?? 0
+      );
+    if (cachedTotal === undefined) {
+      this.tableDataCache.setCount(profileId, schema, table, filters, totalRows);
+    }
     const rows = db.prepare(rowsStatement.sql).all(...(rowsStatement.params as never[])) as Record<string, unknown>[];
-    const durationMs = Math.round(performance.now() - startedAt);
-
-    await this.store.addHistory(
-      this.createHistoryItem(
-        profileId,
-        formatSqlStatementForHistory(rowsStatement, this.engine),
-        {
-          rows: [],
-          fields: [],
-          rowCount: rows.length,
-          command: "SELECT",
-          durationMs
-        },
-        { source: "table-data", target: { schema, table, action: "select" } }
-      )
-    );
 
     return {
       schema,
@@ -1494,7 +1565,7 @@ export class SqliteService implements DatabaseAdapter {
       rows,
       columns: structure.columns,
       primaryKeys: structure.primaryKeys,
-      totalRows: Number(countRow?.count ?? 0),
+      totalRows,
       page: safePage,
       pageSize: safePageSize
     };
@@ -1505,6 +1576,7 @@ export class SqliteService implements DatabaseAdapter {
       throw new Error("Query cannot be empty.");
     }
 
+    this.tableDataCache.invalidateProfile(profileId);
     const { db } = this.getEntry(profileId);
     const startedAt = performance.now();
     const response = executeSqliteStatement(db, sql.trim(), startedAt);
@@ -1513,6 +1585,7 @@ export class SqliteService implements DatabaseAdapter {
   }
 
   async insertRow(input: UpsertRowInput): Promise<void> {
+    this.tableDataCache.invalidateProfile(input.profileId);
     const { db } = this.getEntry(input.profileId);
     const statement = buildInsertSql(this.engine, input.schema, input.table, input.values);
     const startedAt = performance.now();
@@ -1534,6 +1607,7 @@ export class SqliteService implements DatabaseAdapter {
   }
 
   async updateRow(input: UpdateRowInput): Promise<void> {
+    this.tableDataCache.invalidateProfile(input.profileId);
     const { db } = this.getEntry(input.profileId);
     const statement = buildUpdateSql(this.engine, input.schema, input.table, input.key, input.values);
     const startedAt = performance.now();
@@ -1555,6 +1629,7 @@ export class SqliteService implements DatabaseAdapter {
   }
 
   async deleteRow(input: DeleteRowInput): Promise<void> {
+    this.tableDataCache.invalidateProfile(input.profileId);
     const { db } = this.getEntry(input.profileId);
     const statement = buildDeleteSql(this.engine, input.schema, input.table, input.key);
     const startedAt = performance.now();
@@ -1688,6 +1763,7 @@ type TursoEntry = {
 export class TursoService implements DatabaseAdapter {
   readonly engine = "turso" as const;
   private readonly connections = new Map<string, TursoEntry>();
+  private readonly tableDataCache = new TableDataCache();
 
   constructor(private readonly store: AppStore) {}
 
@@ -1708,6 +1784,7 @@ export class TursoService implements DatabaseAdapter {
     try {
       const status = await this.readConnectionStatus(client, profile);
       this.connections.set(profileId, { client, profile });
+      this.tableDataCache.invalidateProfile(profileId);
       return status;
     } catch (error) {
       client.close();
@@ -1783,7 +1860,9 @@ export class TursoService implements DatabaseAdapter {
     const safePageSize = Math.min(Math.max(pageSize, 10), 500);
     const offset = (safePage - 1) * safePageSize;
     const { client } = this.getEntry(profileId);
-    const structure = await this.getTableStructure(profileId, schema, table);
+    const structure = await this.tableDataCache.structure(profileId, schema, table, () =>
+      this.getTableStructure(profileId, schema, table)
+    );
     const countStatement = buildFilteredCountTableSql(this.engine, schema, table, structure.columns, filters);
     const rowsStatement = buildFilteredSelectTableSql(
       this.engine,
@@ -1795,29 +1874,19 @@ export class TursoService implements DatabaseAdapter {
       offset,
       sort
     );
-    const startedAt = performance.now();
+    const cachedTotal = this.tableDataCache.count(profileId, schema, table, filters);
     const [countResult, rowsResult] = await Promise.all([
-      client.execute({ sql: countStatement.sql, args: countStatement.params as never[] }),
+      cachedTotal === undefined
+        ? client.execute({ sql: countStatement.sql, args: countStatement.params as never[] })
+        : Promise.resolve(null),
       client.execute({ sql: rowsStatement.sql, args: rowsStatement.params as never[] })
     ]);
-    const [countRow] = tursoRowsToRecords(countResult);
+    const [countRow] = countResult ? tursoRowsToRecords(countResult) : [];
     const rows = tursoRowsToRecords(rowsResult);
-    const durationMs = Math.round(performance.now() - startedAt);
-
-    await this.store.addHistory(
-      this.createHistoryItem(
-        profileId,
-        formatSqlStatementForHistory(rowsStatement, this.engine),
-        {
-          rows: [],
-          fields: [],
-          rowCount: rows.length,
-          command: "SELECT",
-          durationMs
-        },
-        { source: "table-data", target: { schema, table, action: "select" } }
-      )
-    );
+    const totalRows = cachedTotal ?? Number(countRow?.count ?? 0);
+    if (cachedTotal === undefined) {
+      this.tableDataCache.setCount(profileId, schema, table, filters, totalRows);
+    }
 
     return {
       schema,
@@ -1825,7 +1894,7 @@ export class TursoService implements DatabaseAdapter {
       rows,
       columns: structure.columns,
       primaryKeys: structure.primaryKeys,
-      totalRows: Number(countRow?.count ?? 0),
+      totalRows,
       page: safePage,
       pageSize: safePageSize
     };
@@ -1836,6 +1905,7 @@ export class TursoService implements DatabaseAdapter {
       throw new Error("Query cannot be empty.");
     }
 
+    this.tableDataCache.invalidateProfile(profileId);
     const { client } = this.getEntry(profileId);
     const startedAt = performance.now();
     const result = await client.execute(sql);
@@ -1845,6 +1915,7 @@ export class TursoService implements DatabaseAdapter {
   }
 
   async insertRow(input: UpsertRowInput): Promise<void> {
+    this.tableDataCache.invalidateProfile(input.profileId);
     const { client } = this.getEntry(input.profileId);
     const statement = buildInsertSql(this.engine, input.schema, input.table, input.values);
     const startedAt = performance.now();
@@ -1860,6 +1931,7 @@ export class TursoService implements DatabaseAdapter {
   }
 
   async updateRow(input: UpdateRowInput): Promise<void> {
+    this.tableDataCache.invalidateProfile(input.profileId);
     const { client } = this.getEntry(input.profileId);
     const statement = buildUpdateSql(this.engine, input.schema, input.table, input.key, input.values);
     const startedAt = performance.now();
@@ -1875,6 +1947,7 @@ export class TursoService implements DatabaseAdapter {
   }
 
   async deleteRow(input: DeleteRowInput): Promise<void> {
+    this.tableDataCache.invalidateProfile(input.profileId);
     const { client } = this.getEntry(input.profileId);
     const statement = buildDeleteSql(this.engine, input.schema, input.table, input.key);
     const startedAt = performance.now();
@@ -2010,6 +2083,7 @@ type D1ApiEnvelope = {
 export class CloudflareD1Service implements DatabaseAdapter {
   readonly engine = "cloudflare-d1" as const;
   private readonly connections = new Map<string, D1Entry>();
+  private readonly tableDataCache = new TableDataCache();
 
   constructor(private readonly store: AppStore) {}
 
@@ -2019,6 +2093,7 @@ export class CloudflareD1Service implements DatabaseAdapter {
     await executeCloudflareD1Query(profile, "select 1 as ok");
 
     this.connections.set(profileId, { profile });
+    this.tableDataCache.invalidateProfile(profileId);
     return {
       profileId,
       engine: this.engine,
@@ -2091,7 +2166,9 @@ export class CloudflareD1Service implements DatabaseAdapter {
     const safePageSize = Math.min(Math.max(pageSize, 10), 500);
     const offset = (safePage - 1) * safePageSize;
     const { profile } = this.getEntry(profileId);
-    const structure = await this.getTableStructure(profileId, schema, table);
+    const structure = await this.tableDataCache.structure(profileId, schema, table, () =>
+      this.getTableStructure(profileId, schema, table)
+    );
     const countStatement = buildFilteredCountTableSql(this.engine, schema, table, structure.columns, filters);
     const rowsStatement = buildFilteredSelectTableSql(
       this.engine,
@@ -2103,29 +2180,19 @@ export class CloudflareD1Service implements DatabaseAdapter {
       offset,
       sort
     );
-    const startedAt = performance.now();
+    const cachedTotal = this.tableDataCache.count(profileId, schema, table, filters);
     const [countResult, rowsResult] = await Promise.all([
-      executeCloudflareD1Query(profile, countStatement.sql, countStatement.params),
+      cachedTotal === undefined
+        ? executeCloudflareD1Query(profile, countStatement.sql, countStatement.params)
+        : Promise.resolve(null),
       executeCloudflareD1Query(profile, rowsStatement.sql, rowsStatement.params)
     ]);
-    const [countRow] = countResult.results ?? [];
+    const [countRow] = countResult?.results ?? [];
     const rows = rowsResult.results ?? [];
-    const durationMs = d1DurationMs(rowsResult) ?? Math.round(performance.now() - startedAt);
-
-    await this.store.addHistory(
-      this.createHistoryItem(
-        profileId,
-        formatSqlStatementForHistory(rowsStatement, this.engine),
-        {
-          rows: [],
-          fields: [],
-          rowCount: rows.length,
-          command: "SELECT",
-          durationMs
-        },
-        { source: "table-data", target: { schema, table, action: "select" } }
-      )
-    );
+    const totalRows = cachedTotal ?? Number(countRow?.count ?? 0);
+    if (cachedTotal === undefined) {
+      this.tableDataCache.setCount(profileId, schema, table, filters, totalRows);
+    }
 
     return {
       schema,
@@ -2133,7 +2200,7 @@ export class CloudflareD1Service implements DatabaseAdapter {
       rows,
       columns: structure.columns,
       primaryKeys: structure.primaryKeys,
-      totalRows: Number(countRow?.count ?? 0),
+      totalRows,
       page: safePage,
       pageSize: safePageSize
     };
@@ -2144,6 +2211,7 @@ export class CloudflareD1Service implements DatabaseAdapter {
       throw new Error("Query cannot be empty.");
     }
 
+    this.tableDataCache.invalidateProfile(profileId);
     const { profile } = this.getEntry(profileId);
     const startedAt = performance.now();
     const result = await executeCloudflareD1Query(profile, sql);
@@ -2153,6 +2221,7 @@ export class CloudflareD1Service implements DatabaseAdapter {
   }
 
   async insertRow(input: UpsertRowInput): Promise<void> {
+    this.tableDataCache.invalidateProfile(input.profileId);
     const { profile } = this.getEntry(input.profileId);
     const statement = buildInsertSql(this.engine, input.schema, input.table, input.values);
     const startedAt = performance.now();
@@ -2168,6 +2237,7 @@ export class CloudflareD1Service implements DatabaseAdapter {
   }
 
   async updateRow(input: UpdateRowInput): Promise<void> {
+    this.tableDataCache.invalidateProfile(input.profileId);
     const { profile } = this.getEntry(input.profileId);
     const statement = buildUpdateSql(this.engine, input.schema, input.table, input.key, input.values);
     const startedAt = performance.now();
@@ -2183,6 +2253,7 @@ export class CloudflareD1Service implements DatabaseAdapter {
   }
 
   async deleteRow(input: DeleteRowInput): Promise<void> {
+    this.tableDataCache.invalidateProfile(input.profileId);
     const { profile } = this.getEntry(input.profileId);
     const statement = buildDeleteSql(this.engine, input.schema, input.table, input.key);
     const startedAt = performance.now();

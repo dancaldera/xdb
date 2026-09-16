@@ -1,10 +1,10 @@
 ---
 // biome-ignore-all lint/correctness/noUnusedImports: Astro component tags consume these imports.
 // biome-ignore-all lint/correctness/noUnusedVariables: Astro template expressions consume these constants.
+import packageJson from "../../package.json";
 import ProductMock from "../components/ProductMock.astro";
 import SiteHeader from "../components/SiteHeader.astro";
 import BaseLayout from "../layouts/BaseLayout.astro";
-import packageJson from "../../package.json";
 
 const version = packageJson.version;
 const githubUrl = "https://github.com/dancaldera/xdb";

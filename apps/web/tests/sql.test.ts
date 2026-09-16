@@ -1,5 +1,4 @@
 import { describe, expect, test } from "vitest";
-import type { TableColumn, TableFilterOperator } from "../src/shared/types";
 import {
   buildCreateDatabaseSql,
   buildDeleteSql,
@@ -13,6 +12,7 @@ import {
   formatSqlStatementForHistory,
   quoteIdentifier
 } from "../src/main/sql";
+import type { TableColumn, TableFilterOperator } from "../src/shared/types";
 
 const columns: TableColumn[] = [
   {

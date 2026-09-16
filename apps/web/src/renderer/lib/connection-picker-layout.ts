@@ -1,21 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ConnectionPickerLayout } from "../../shared/types";
 import {
   applyConnectionPickerLayout,
-  createDefaultLayout,
-  reconcileConnectionPickerLayout,
-  reorderIds,
-  type ConnectionGroupSectionLike,
-  type ReorderSide,
   CONNECTION_PICKER_COLLAPSED_LEGACY_STORAGE_KEY,
-  CONNECTION_PICKER_LAYOUT_STORAGE_KEY
+  CONNECTION_PICKER_LAYOUT_STORAGE_KEY,
+  type ConnectionGroupSectionLike,
+  createDefaultLayout,
+  type ReorderSide,
+  reconcileConnectionPickerLayout,
+  reorderIds
 } from "../../shared/connection-picker-layout";
+import type { ConnectionPickerLayout } from "../../shared/types";
 
 export {
+  applyConnectionPickerLayout,
   connectionGroupSectionKey,
   createDefaultLayout,
   reconcileConnectionPickerLayout,
-  applyConnectionPickerLayout,
   reorderIds,
   UNGROUPED_SECTION_KEY
 } from "../../shared/connection-picker-layout";
@@ -264,4 +264,4 @@ export function useConnectionPickerLayout<T extends ConnectionGroupSectionLike>(
   };
 }
 
-export type { GroupDropTarget, ConnectionDropTarget };
+export type { ConnectionDropTarget, GroupDropTarget };

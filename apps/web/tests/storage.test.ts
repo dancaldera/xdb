@@ -1,8 +1,8 @@
-import { describe, expect, test } from "vitest";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Readable } from "node:stream";
+import { describe, expect, test } from "vitest";
 import {
   classifyPreview,
   formatStorageBytes,
@@ -146,7 +146,7 @@ describe("StorageService", () => {
     ]);
   });
 
-  test("previews image and text objects", async () => {
+  test("previews media objects via signed URLs and text objects inline", async () => {
     const client = new FakeS3Client();
     client.responses.set("HeadObjectCommand:root/cat.png", {
       ContentLength: 3,
@@ -154,9 +154,6 @@ describe("StorageService", () => {
       ETag: "abc",
       LastModified: new Date("2026-01-01T00:00:00.000Z"),
       Metadata: {}
-    });
-    client.responses.set("GetObjectCommand:root/cat.png", {
-      Body: { transformToByteArray: async () => new Uint8Array([1, 2, 3]) }
     });
     client.responses.set("HeadObjectCommand:root/readme.txt", {
       ContentLength: 5,
@@ -166,14 +163,99 @@ describe("StorageService", () => {
     client.responses.set("GetObjectCommand:root/readme.txt", {
       Body: { transformToByteArray: async () => new TextEncoder().encode("hello") }
     });
-    const service = new StorageService(new FakeStore(profile) as unknown as AppStore, () => client as never);
+    const service = new StorageService(
+      new FakeStore(profile) as unknown as AppStore,
+      () => client as never,
+      async (_entry, key) => `https://signed.example/${key}`
+    );
     await service.connect(profile.id);
 
     const image = await service.previewObject(profile.id, "cat.png");
     const text = await service.previewObject(profile.id, "readme.txt");
 
-    expect(image).toMatchObject({ kind: "image", dataUrl: "data:image/png;base64,AQID" });
+    expect(image).toMatchObject({ kind: "image", url: "https://signed.example/root/cat.png" });
     expect(text).toMatchObject({ kind: "text", text: "hello", truncated: false });
+  });
+
+  test("lists buckets and switches the active bucket", async () => {
+    const client = new FakeS3Client();
+    client.responses.set("ListBucketsCommand", {
+      Buckets: [
+        { Name: "backups", CreationDate: new Date("2026-01-02T00:00:00.000Z") },
+        { Name: "assets", CreationDate: new Date("2026-01-01T00:00:00.000Z") }
+      ]
+    });
+    const service = new StorageService(new FakeStore(profile) as unknown as AppStore, () => client as never);
+    await service.connect(profile.id);
+
+    const buckets = await service.listBuckets(profile.id);
+    const status = await service.selectBucket(profile.id, "backups");
+
+    expect(buckets.map((bucket) => bucket.name)).toEqual(["assets", "backups"]);
+    expect(status.bucket).toBe("backups");
+    expect(status.rootPrefix).toBe("");
+    expect(client.commands.at(-1)).toEqual({ name: "HeadBucketCommand", input: { Bucket: "backups" } });
+  });
+
+  test("filter search lists keys recursively without folders", async () => {
+    const client = new FakeS3Client();
+    client.responses.set("ListObjectsV2Command", {
+      Contents: [
+        { Key: "root/current/cat.png", Size: 24 },
+        { Key: "root/current/dog.png", Size: 30 },
+        { Key: "root/current/nested/cat-2.png", Size: 12 }
+      ]
+    });
+    const service = new StorageService(new FakeStore(profile) as unknown as AppStore, () => client as never);
+    await service.connect(profile.id);
+
+    const result = await service.listObjects({ profileId: profile.id, prefix: "current/", filter: "cat" });
+
+    expect(client.commands.at(-1)?.input).toMatchObject({ Prefix: "root/current/", MaxKeys: 1000 });
+    expect(client.commands.at(-1)?.input.Delimiter).toBeUndefined();
+    expect(result.objects.map((object) => object.key)).toEqual(["current/nested/cat-2.png", "current/cat.png"]);
+  });
+
+  test("deletes folders recursively and chunks large deletes", async () => {
+    const client = new FakeS3Client();
+    client.responses.set("ListObjectsV2Command", {
+      Contents: [{ Key: "root/photos/a.png" }, { Key: "root/photos/b.png" }, { Key: "root/photos/nested/c.png" }]
+    });
+    const service = new StorageService(new FakeStore(profile) as unknown as AppStore, () => client as never);
+    await service.connect(profile.id);
+
+    await service.deleteObjects({ profileId: profile.id, keys: ["photos/"] });
+
+    const deleteBatch = client.commands.find((command) => command.name === "DeleteObjectsCommand");
+    const deleteInput = deleteBatch?.input.Delete as { Objects: Array<{ Key: string }> } | undefined;
+    const deletedKeys = (deleteInput?.Objects ?? []).map((object) => object.Key);
+    expect(deletedKeys.sort()).toEqual([
+      "root/photos/",
+      "root/photos/a.png",
+      "root/photos/b.png",
+      "root/photos/nested/c.png"
+    ]);
+  });
+
+  test("copies folders recursively preserving structure", async () => {
+    const client = new FakeS3Client();
+    client.responses.set("ListObjectsV2Command", {
+      Contents: [{ Key: "root/photos/a.png" }, { Key: "root/photos/nested/c.png" }]
+    });
+    const service = new StorageService(new FakeStore(profile) as unknown as AppStore, () => client as never);
+    await service.connect(profile.id);
+
+    await service.copyObject({
+      profileId: profile.id,
+      sourceKey: "photos/",
+      destinationKey: "backup/",
+      overwrite: true
+    });
+
+    const destinations = client.commands
+      .filter((command) => command.name === "CopyObjectCommand")
+      .map((command) => command.input.Key);
+    expect(destinations.sort()).toEqual(["root/backup/a.png", "root/backup/nested/c.png"]);
   });
 
   test("downloads, creates folders, copies, moves, and deletes objects", async () => {

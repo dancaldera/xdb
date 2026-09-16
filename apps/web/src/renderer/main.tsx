@@ -1,5 +1,5 @@
 import "./lib/xdb-client";
-import { Component, StrictMode, type ErrorInfo, type ReactNode } from "react";
+import { Component, type ErrorInfo, type ReactNode, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import "./styles/app.css";

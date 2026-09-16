@@ -2,10 +2,10 @@ import { sql } from "@codemirror/lang-sql";
 import CodeMirror from "@uiw/react-codemirror";
 import {
   Activity,
+  Archive,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
-  Archive,
   Atom,
   Binary,
   Bird,
@@ -38,11 +38,11 @@ import {
   Dna,
   Download,
   Droplet,
+  ExternalLink,
   Eye,
   EyeOff,
-  ExternalLink,
   Feather,
-  File,
+  type File,
   FileClock,
   FileDown,
   FileUp,
@@ -62,13 +62,13 @@ import {
   HardDrive,
   Hexagon,
   Hourglass,
-  Image as ImageIcon,
   KeyRound,
   Layers,
   Leaf,
-  Loader2,
   ListChecks,
+  Loader2,
   Lock,
+  type LucideIcon,
   Magnet,
   MemoryStick,
   Microscope,
@@ -79,23 +79,23 @@ import {
   Network,
   Octagon,
   Orbit,
+  Package,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
   Play,
   Plus,
   Printer,
-  Package,
   Puzzle,
-  Radio,
   Rabbit,
+  Radio,
   RefreshCcw,
   RefreshCw,
   Rocket,
   Rss,
-  Save,
   Satellite,
   SatelliteDish,
+  Save,
   Scan,
   Search,
   Server,
@@ -104,8 +104,8 @@ import {
   Shield,
   Sigma,
   Skull,
-  Smartphone,
   SlidersHorizontal,
+  Smartphone,
   Snail,
   Snowflake,
   Sprout,
@@ -133,43 +133,37 @@ import {
   Wind,
   Wrench,
   X,
-  Zap,
-  type LucideIcon
+  Zap
 } from "lucide-react";
 import type { CSSProperties, DragEvent, FormEvent, MouseEvent, PointerEvent, ReactElement, ReactNode } from "react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ModalBackdrop } from "./components/ModalBackdrop";
 import { Toaster, toast } from "sonner";
-import mysqlIconUrl from "./assets/database-icons/mysql.svg";
-import postgresqlIconUrl from "./assets/database-icons/postgresql.svg";
-import sqliteIconUrl from "./assets/database-icons/sqlite.svg";
-import cloudflareD1IconUrl from "./assets/database-icons/cloudflare-d1.svg";
-import s3CompatibleIconUrl from "./assets/database-icons/s3-compatible.svg";
-import tursoIconUrl from "./assets/database-icons/turso.svg";
-import { buildConnectionString, normalizeConnectionInput } from "../shared/connections";
 import { version as appVersion } from "../../package.json";
+import { buildConnectionString, normalizeConnectionInput } from "../shared/connections";
 import type {
   AppSettings,
+  ConnectionEngine,
   ConnectionGroup,
   ConnectionGroupInput,
+  ConnectionIconMode,
   ConnectionInput,
   ConnectionProfile,
   ConnectionRuntimeStatus,
-  ConnectionEngine,
-  ConnectionIconMode,
   ConnectionTestResult,
   DatabaseBackupProgress,
-  DatabaseRestoreProgress,
   DatabaseEngine,
   DatabaseInfo,
   DatabaseObject,
+  DatabaseRestoreProgress,
   QueryExecutionResult,
   QueryHistoryItem,
   SavedSqlQuery,
   SslMode,
+  StorageBucket,
   StorageObject,
   StorageObjectMetadata,
   StoragePreviewResult,
+  StorageTransferProgress,
   TableColumn,
   TableDataResult,
   TableFilterInput,
@@ -180,14 +174,23 @@ import type {
   TableStructure,
   ThemePreference
 } from "../shared/types";
+import cloudflareD1IconUrl from "./assets/database-icons/cloudflare-d1.svg";
+import mysqlIconUrl from "./assets/database-icons/mysql.svg";
+import postgresqlIconUrl from "./assets/database-icons/postgresql.svg";
+import s3CompatibleIconUrl from "./assets/database-icons/s3-compatible.svg";
+import sqliteIconUrl from "./assets/database-icons/sqlite.svg";
+import tursoIconUrl from "./assets/database-icons/turso.svg";
+import { ModalBackdrop } from "./components/ModalBackdrop";
+import { ResultTable } from "./components/ResultTable";
+import { StorageWorkspace } from "./components/StorageWorkspace";
+import {
+  type ConnectionDropTarget,
+  connectionGroupSectionKey,
+  type GroupDropTarget,
+  useConnectionPickerLayout
+} from "./lib/connection-picker-layout";
 import type { ClipboardRowFormat } from "./lib/format";
 import { formatCell, formatRowsForClipboard, parseCellInput } from "./lib/format";
-import {
-  connectionGroupSectionKey,
-  useConnectionPickerLayout,
-  type ConnectionDropTarget,
-  type GroupDropTarget
-} from "./lib/connection-picker-layout";
 
 const DEFAULT_SQL = "select current_database(), current_user, now();";
 const SQL_DRAFT_SAVE_DELAY_MS = 500;
@@ -640,6 +643,11 @@ export function App(): ReactElement {
   const [selectedStorageObject, setSelectedStorageObject] = useState<StorageObject | null>(null);
   const [storageMetadata, setStorageMetadata] = useState<StorageObjectMetadata | null>(null);
   const [storagePreview, setStoragePreview] = useState<StoragePreviewResult | null>(null);
+  const [storageBuckets, setStorageBuckets] = useState<StorageBucket[]>([]);
+  const [storageBucket, setStorageBucket] = useState("");
+  const [storageFilter, setStorageFilter] = useState("");
+  const [storageUploadProgress, setStorageUploadProgress] = useState<StorageTransferProgress | null>(null);
+  const storageFilterTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [objectTabs, setObjectTabs] = useState<ObjectTab[]>([]);
   const [activeObjectTabId, setActiveObjectTabId] = useState<ObjectTabId | null>(null);
   const connectionSessionsRef = useRef<Record<string, ConnectionSessionSnapshot>>({});
@@ -807,6 +815,21 @@ export function App(): ReactElement {
     });
   }, []);
 
+  useEffect(() => {
+    return window.xdb.onStorageTransferProgress((progress: StorageTransferProgress) => {
+      if (progress.phase === "uploading") {
+        setStorageUploadProgress(progress);
+        return;
+      }
+
+      setStorageUploadProgress(progress.phase === "done" ? null : progress);
+      if (progress.phase === "failed") {
+        toast.error("Upload failed", { description: progress.current });
+        window.setTimeout(() => setStorageUploadProgress(null), 4000);
+      }
+    });
+  }, []);
+
   const loadConnections = useCallback(async () => {
     const [items, groups] = await Promise.all([window.xdb.listConnections(), window.xdb.listConnectionGroups()]);
 
@@ -834,7 +857,8 @@ export function App(): ReactElement {
     async (
       profileId = selectedProfileId,
       prefix = storagePrefix,
-      continuationToken: string | null = storageContinuationToken
+      continuationToken: string | null = storageContinuationToken,
+      filter = storageFilter
     ) => {
       if (!profileId) {
         return;
@@ -844,7 +868,8 @@ export function App(): ReactElement {
         profileId,
         prefix,
         continuationToken: continuationToken ?? undefined,
-        pageSize: PAGE_SIZE
+        pageSize: PAGE_SIZE,
+        filter: filter || undefined
       });
       setStorageObjects(result.objects);
       setStoragePrefix(result.prefix);
@@ -853,7 +878,7 @@ export function App(): ReactElement {
       setStorageMetadata(null);
       setStoragePreview(null);
     },
-    [selectedProfileId, storageContinuationToken, storagePrefix]
+    [selectedProfileId, storageContinuationToken, storageFilter, storagePrefix]
   );
 
   const loadHistory = useCallback(
@@ -943,7 +968,8 @@ export function App(): ReactElement {
       targetTab: ObjectTab,
       targetPage = targetTab.page,
       targetFilters = targetTab.appliedFilters,
-      targetSort = targetTab.tableSort
+      targetSort = targetTab.tableSort,
+      forceStructure = false
     ) => {
       if (!selectedProfileId) {
         return;
@@ -959,7 +985,9 @@ export function App(): ReactElement {
           targetFilters,
           targetSort
         ),
-        window.xdb.getTableStructure(selectedProfileId, targetTab.object.schema, targetTab.object.name)
+        targetTab.structure && !forceStructure
+          ? Promise.resolve(targetTab.structure)
+          : window.xdb.getTableStructure(selectedProfileId, targetTab.object.schema, targetTab.object.name)
       ]);
 
       updateObjectTab(targetTab.id, (tab) => ({
@@ -1209,6 +1237,10 @@ export function App(): ReactElement {
     setSelectedStorageObject(null);
     setStorageMetadata(null);
     setStoragePreview(null);
+    setStorageBuckets([]);
+    setStorageBucket("");
+    setStorageFilter("");
+    setStorageUploadProgress(null);
     setObjectTabs([]);
     setActiveObjectTabId(null);
     setCloseObjectTabConfirmation(null);
@@ -1263,6 +1295,10 @@ export function App(): ReactElement {
         setStoragePrefix("");
         setStoragePreviousTokens([]);
         setStorageContinuationToken(null);
+        setStorageFilter("");
+        setStorageBucket(nextStatus.bucket);
+        const bucketList = await window.xdb.listStorageBuckets(profileId).catch(() => [] as StorageBucket[]);
+        setStorageBuckets(bucketList.length > 0 ? bucketList : [{ name: nextStatus.bucket, creationDate: null }]);
         await loadStorageObjects(profileId, "", null);
       } else {
         const restoredSession = connectionSessionsRef.current[profileId];
@@ -1586,6 +1622,40 @@ export function App(): ReactElement {
     });
   };
 
+  const selectStorageBucket = async (bucket: string): Promise<void> => {
+    if (!selectedProfileId || bucket === storageBucket) {
+      return;
+    }
+
+    await runTask(async () => {
+      const nextStatus = await window.xdb.selectStorageBucket(selectedProfileId, bucket);
+      setStatus(nextStatus);
+      setStorageBucket(nextStatus.bucket);
+      setStoragePrefix("");
+      setStorageFilter("");
+      setStoragePreviousTokens([]);
+      setStorageContinuationToken(null);
+      setSelectedStorageObject(null);
+      setStorageMetadata(null);
+      setStoragePreview(null);
+      await loadStorageObjects(selectedProfileId, "", null);
+    });
+  };
+
+  const applyStorageFilter = (value: string): void => {
+    setStorageFilter(value);
+    if (storageFilterTimeout.current) {
+      clearTimeout(storageFilterTimeout.current);
+    }
+
+    storageFilterTimeout.current = setTimeout(() => {
+      setStoragePreviousTokens([]);
+      setStorageContinuationToken(null);
+      void runTask(() => loadStorageObjects(selectedProfileId, storagePrefix, null, value));
+      storageFilterTimeout.current = null;
+    }, 250);
+  };
+
   const openStorageFolder = async (prefix: string): Promise<void> => {
     setStoragePreviousTokens([]);
     setStorageContinuationToken(null);
@@ -1614,44 +1684,45 @@ export function App(): ReactElement {
     await runTask(() => loadStorageObjects(selectedProfileId, storagePrefix, previousToken));
   };
 
-  const previewSelectedStorageObject = async (): Promise<void> => {
-    if (selectedStorageObject?.type !== "file") {
+  const previewStorageObject = async (object: StorageObject): Promise<void> => {
+    if (object.type !== "file") {
       return;
     }
 
     await runTask(async () => {
-      setStoragePreview(await window.xdb.previewStorageObject(selectedProfileId, selectedStorageObject.key));
+      setStoragePreview(await window.xdb.previewStorageObject(selectedProfileId, object.key));
     });
   };
 
-  const downloadSelectedStorageObject = async (): Promise<void> => {
-    if (selectedStorageObject?.type !== "file") {
+  const downloadStorageObject = async (object: StorageObject): Promise<void> => {
+    if (object.type !== "file") {
       return;
     }
 
-    await runTask(async () => {
-      const result = await window.xdb.downloadStorageObject(selectedProfileId, selectedStorageObject.key);
-      if (result) {
-        toast.success("File downloaded", { description: result.filePath });
-      }
-    });
+    await window.xdb.downloadStorageObject(selectedProfileId, object.key);
   };
 
-  const uploadStorageFiles = async (): Promise<void> => {
+  const uploadStorageFiles = async (files?: File[]): Promise<void> => {
+    const taskId = crypto.randomUUID();
     await runTask(async () => {
-      const result = await window.xdb.uploadStorageFiles(selectedProfileId, storagePrefix);
+      const result = await window.xdb.uploadStorageFiles(selectedProfileId, storagePrefix, files, taskId);
       if (result) {
-        toast.success("Files uploaded", { description: `${result.uploaded} uploaded, ${result.skipped} skipped` });
+        const failedNote = result.failed ? `, ${result.failed} failed` : "";
+        toast.success("Files uploaded", {
+          description: `${result.uploaded} uploaded, ${result.skipped} skipped${failedNote}`
+        });
         await loadStorageObjects(selectedProfileId, storagePrefix, storageContinuationToken);
       }
     });
   };
 
   const uploadStorageFolder = async (): Promise<void> => {
+    const taskId = crypto.randomUUID();
     await runTask(async () => {
-      const result = await window.xdb.uploadStorageFolder(selectedProfileId, storagePrefix);
+      const result = await window.xdb.uploadStorageFolder(selectedProfileId, storagePrefix, undefined, taskId);
       if (result) {
-        toast.success("Folder uploaded", { description: `${result.uploaded} uploaded` });
+        const failedNote = result.failed ? `, ${result.failed} failed` : "";
+        toast.success("Folder uploaded", { description: `${result.uploaded} uploaded${failedNote}` });
         await loadStorageObjects(selectedProfileId, storagePrefix, storageContinuationToken);
       }
     });
@@ -1669,57 +1740,71 @@ export function App(): ReactElement {
     });
   };
 
-  const copySelectedStorageObject = async (): Promise<void> => {
-    if (selectedStorageObject?.type !== "file") {
+  const copyStorageObject = async (object: StorageObject): Promise<void> => {
+    const isFolder = object.type === "folder";
+    const sourceKey = isFolder ? object.key.replace(/\/+$/, "") : object.key;
+    const destinationInput = window.prompt(`Copy ${isFolder ? "folder" : "file"} to`, sourceKey);
+    if (!destinationInput || destinationInput === sourceKey) {
       return;
     }
-
-    const destinationKey = window.prompt("Copy to key", selectedStorageObject.key);
-    if (!destinationKey || destinationKey === selectedStorageObject.key) {
-      return;
-    }
+    const destinationKey = isFolder ? `${destinationInput.replace(/\/+$/, "")}/` : destinationInput;
 
     await runTask(async () => {
       await window.xdb.copyStorageObject({
         profileId: selectedProfileId,
-        sourceKey: selectedStorageObject.key,
+        sourceKey: object.key,
         destinationKey
       });
+      toast.success(isFolder ? "Folder copied" : "File copied", { description: destinationKey });
       await loadStorageObjects(selectedProfileId, storagePrefix, storageContinuationToken);
     });
   };
 
-  const moveSelectedStorageObject = async (): Promise<void> => {
-    if (selectedStorageObject?.type !== "file") {
+  const moveStorageObject = async (object: StorageObject): Promise<void> => {
+    const isFolder = object.type === "folder";
+    const sourceKey = isFolder ? object.key.replace(/\/+$/, "") : object.key;
+    const destinationInput = window.prompt(`Rename ${isFolder ? "folder" : "file"} to`, sourceKey);
+    if (!destinationInput || destinationInput === sourceKey) {
       return;
     }
-
-    const destinationKey = window.prompt("Move to key", selectedStorageObject.key);
-    if (!destinationKey || destinationKey === selectedStorageObject.key) {
-      return;
-    }
+    const destinationKey = isFolder ? `${destinationInput.replace(/\/+$/, "")}/` : destinationInput;
 
     await runTask(async () => {
       await window.xdb.moveStorageObject({
         profileId: selectedProfileId,
-        sourceKey: selectedStorageObject.key,
+        sourceKey: object.key,
         destinationKey
       });
+      toast.success(isFolder ? "Folder renamed" : "File renamed", { description: destinationKey });
       await loadStorageObjects(selectedProfileId, storagePrefix, storageContinuationToken);
     });
   };
 
-  const deleteSelectedStorageObject = async (): Promise<void> => {
-    if (!selectedStorageObject) {
+  const deleteStorageObjects = async (targets: StorageObject[]): Promise<void> => {
+    if (targets.length === 0) {
       return;
     }
 
-    if (!window.confirm(`Delete ${selectedStorageObject.key}?`)) {
+    const folderCount = targets.filter((target) => target.type === "folder").length;
+    const label =
+      targets.length === 1
+        ? targets[0].key
+        : `${targets.length} objects${folderCount > 0 ? ` (including ${folderCount} folders and their contents)` : ""}`;
+    if (
+      !window.confirm(`Delete ${label}?${folderCount > 0 ? "\n\nFolder contents will be deleted recursively." : ""}`)
+    ) {
       return;
     }
 
     await runTask(async () => {
-      await window.xdb.deleteStorageObjects({ profileId: selectedProfileId, keys: [selectedStorageObject.key] });
+      await window.xdb.deleteStorageObjects({
+        profileId: selectedProfileId,
+        keys: targets.map((target) => target.key)
+      });
+      toast.success("Deleted", { description: label });
+      setSelectedStorageObject(null);
+      setStorageMetadata(null);
+      setStoragePreview(null);
       await loadStorageObjects(selectedProfileId, storagePrefix, storageContinuationToken);
     });
   };
@@ -1994,7 +2079,9 @@ export function App(): ReactElement {
   const refreshObjectTab = async (tab: ObjectTab): Promise<void> => {
     const tableName = objectDisplayName(tab.object);
     const toastId = toast.loading("Reloading table...", { description: tableName });
-    const reloaded = await runTask(() => loadObjectTabData(tab), { errorToast: false });
+    const reloaded = await runTask(() => loadObjectTabData(tab, tab.page, tab.appliedFilters, tab.tableSort, true), {
+      errorToast: false
+    });
 
     if (reloaded) {
       toast.success("Table reloaded", { id: toastId, description: tableName });
@@ -2512,28 +2599,34 @@ export function App(): ReactElement {
             <ConnectionLoader profile={connectingProfile} />
           ) : connectedStorage ? (
             <StorageWorkspace
+              bucket={storageBucket}
+              buckets={storageBuckets}
+              canGoBack={storagePrefix !== ""}
+              canPageBack={storagePreviousTokens.length > 0}
+              canPageForward={Boolean(storageNextToken)}
+              filter={storageFilter}
               metadata={storageMetadata}
               objects={storageObjects}
               prefix={storagePrefix}
               preview={storagePreview}
               selectedObject={selectedStorageObject}
-              canGoBack={storagePrefix !== ""}
-              canPageBack={storagePreviousTokens.length > 0}
-              canPageForward={Boolean(storageNextToken)}
+              transferProgress={storageUploadProgress}
               onBack={openParentStorageFolder}
-              onCopy={copySelectedStorageObject}
+              onCopy={copyStorageObject}
               onCreateFolder={createStorageFolder}
-              onDelete={deleteSelectedStorageObject}
-              onDownload={downloadSelectedStorageObject}
-              onMove={moveSelectedStorageObject}
+              onDelete={deleteStorageObjects}
+              onDownload={downloadStorageObject}
+              onFilterChange={applyStorageFilter}
+              onMove={moveStorageObject}
               onNextPage={loadNextStoragePage}
               onOpenFolder={openStorageFolder}
-              onPreview={previewSelectedStorageObject}
+              onPreview={previewStorageObject}
               onPreviousPage={loadPreviousStoragePage}
               onRefresh={() =>
                 void runTask(() => loadStorageObjects(selectedProfileId, storagePrefix, storageContinuationToken))
               }
               onSelect={(object) => void selectStorageObject(object)}
+              onSelectBucket={selectStorageBucket}
               onUploadFiles={uploadStorageFiles}
               onUploadFolder={uploadStorageFolder}
             />
@@ -5760,9 +5853,12 @@ function QueryView({
       <div className="query-result">
         <div className="result-meta">
           <strong>{result ? `${result.command} in ${result.durationMs}ms` : "Result"}</strong>
-          <span>{result?.notice ?? (result ? `${result.rowCount ?? result.rows.length} rows` : "")}</span>
+          <span>
+            {result?.notice ??
+              (result ? `${result.rowCount ?? result.rows.length} rows${result.truncated ? " (truncated)" : ""}` : "")}
+          </span>
         </div>
-        <ResultTable rows={result?.rows ?? []} />
+        <ResultTable rows={result?.rows ?? []} truncated={result?.truncated} />
       </div>
     </div>
   );
@@ -5944,214 +6040,6 @@ function historyTargetLabel(item: QueryHistoryItem): string {
 
 function historyRowCountLabel(item: QueryHistoryItem): string {
   return item.rowCount === null ? "Rows unknown" : `${item.rowCount.toLocaleString()} rows`;
-}
-
-function StorageWorkspace({
-  metadata,
-  objects,
-  prefix,
-  preview,
-  selectedObject,
-  canGoBack,
-  canPageBack,
-  canPageForward,
-  onBack,
-  onCopy,
-  onCreateFolder,
-  onDelete,
-  onDownload,
-  onMove,
-  onNextPage,
-  onOpenFolder,
-  onPreview,
-  onPreviousPage,
-  onRefresh,
-  onSelect,
-  onUploadFiles,
-  onUploadFolder
-}: {
-  metadata: StorageObjectMetadata | null;
-  objects: StorageObject[];
-  prefix: string;
-  preview: StoragePreviewResult | null;
-  selectedObject: StorageObject | null;
-  canGoBack: boolean;
-  canPageBack: boolean;
-  canPageForward: boolean;
-  onBack: () => Promise<void>;
-  onCopy: () => Promise<void>;
-  onCreateFolder: () => Promise<void>;
-  onDelete: () => Promise<void>;
-  onDownload: () => Promise<void>;
-  onMove: () => Promise<void>;
-  onNextPage: () => Promise<void>;
-  onOpenFolder: (prefix: string) => Promise<void>;
-  onPreview: () => Promise<void>;
-  onPreviousPage: () => Promise<void>;
-  onRefresh: () => void;
-  onSelect: (object: StorageObject) => void;
-  onUploadFiles: () => Promise<void>;
-  onUploadFolder: () => Promise<void>;
-}): ReactElement {
-  const selectedFile = selectedObject?.type === "file";
-
-  return (
-    <div className="storage-workspace">
-      <section className="storage-main">
-        <div className="panel-toolbar">
-          <div className="storage-pathbar">
-            <button
-              className="icon-button"
-              type="button"
-              title="Parent folder"
-              onClick={() => void onBack()}
-              disabled={!canGoBack}
-            >
-              <ChevronRight className="rotate-180" size={16} />
-            </button>
-            <strong>{prefix || "Bucket root"}</strong>
-          </div>
-          <div className="storage-actions">
-            <button className="icon-button" type="button" title="Refresh" onClick={onRefresh}>
-              <RefreshCcw size={15} />
-            </button>
-            <button className="button secondary" type="button" onClick={() => void onUploadFiles()}>
-              <Upload size={15} />
-              Files
-            </button>
-            <button className="button secondary" type="button" onClick={() => void onUploadFolder()}>
-              <FolderPlus size={15} />
-              Folder
-            </button>
-            <button className="button secondary" type="button" onClick={() => void onCreateFolder()}>
-              <Plus size={15} />
-              New folder
-            </button>
-          </div>
-        </div>
-
-        <div className="table-scroll storage-table-scroll">
-          <table className="data-grid storage-grid" aria-label="Bucket objects">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Size</th>
-                <th>Last modified</th>
-                <th>ETag</th>
-              </tr>
-            </thead>
-            <tbody>
-              {objects.map((object) => (
-                <tr
-                  className={selectedObject?.key === object.key ? "selected-row" : ""}
-                  key={`${object.type}:${object.key}`}
-                  onClick={() => onSelect(object)}
-                  onDoubleClick={() => (object.type === "folder" ? void onOpenFolder(object.prefix) : void onPreview())}
-                >
-                  <td>
-                    <span className="storage-name-cell">
-                      {object.type === "folder" ? <Folder size={14} /> : <File size={14} />}
-                      {object.name}
-                    </span>
-                  </td>
-                  <td>{object.type}</td>
-                  <td>{formatStorageSize(object.size)}</td>
-                  <td>{object.lastModified ? new Date(object.lastModified).toLocaleString() : ""}</td>
-                  <td>{object.etag}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="insert-row">
-          <div className="insert-row-actions">
-            <button
-              className="button secondary"
-              type="button"
-              onClick={() => void onPreviousPage()}
-              disabled={!canPageBack}
-            >
-              Previous
-            </button>
-            <button
-              className="button secondary"
-              type="button"
-              onClick={() => void onNextPage()}
-              disabled={!canPageForward}
-            >
-              Next
-            </button>
-          </div>
-          <div className="insert-row-actions">
-            <button
-              className="button secondary"
-              type="button"
-              onClick={() => void onPreview()}
-              disabled={!selectedFile}
-            >
-              <ImageIcon size={15} />
-              Preview
-            </button>
-            <button
-              className="button secondary"
-              type="button"
-              onClick={() => void onDownload()}
-              disabled={!selectedFile}
-            >
-              <Download size={15} />
-              Download
-            </button>
-            <button className="button secondary" type="button" onClick={() => void onCopy()} disabled={!selectedFile}>
-              <Clipboard size={15} />
-              Copy
-            </button>
-            <button className="button secondary" type="button" onClick={() => void onMove()} disabled={!selectedFile}>
-              <Pencil size={15} />
-              Rename
-            </button>
-            <button className="button danger" type="button" onClick={() => void onDelete()} disabled={!selectedObject}>
-              <Trash2 size={15} />
-              Delete
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <aside className="storage-preview-panel">
-        <header>
-          <strong>{selectedObject?.name ?? "No object selected"}</strong>
-          <span>{selectedObject?.key ?? "Select a file or folder"}</span>
-        </header>
-        {preview?.kind === "image" ? (
-          <img className="storage-image-preview" alt={preview.key} src={preview.dataUrl} />
-        ) : null}
-        {preview?.kind === "text" ? <pre className="storage-text-preview">{preview.text}</pre> : null}
-        {preview?.kind === "unsupported" ? <p className="storage-preview-message">{preview.reason}</p> : null}
-        {metadata ? (
-          <dl className="storage-metadata">
-            <div>
-              <dt>Content type</dt>
-              <dd>{metadata.contentType ?? ""}</dd>
-            </div>
-            <div>
-              <dt>Size</dt>
-              <dd>{formatStorageSize(metadata.size)}</dd>
-            </div>
-            <div>
-              <dt>Last modified</dt>
-              <dd>{metadata.lastModified ? new Date(metadata.lastModified).toLocaleString() : ""}</dd>
-            </div>
-            <div>
-              <dt>ETag</dt>
-              <dd>{metadata.etag ?? ""}</dd>
-            </div>
-          </dl>
-        ) : null}
-      </aside>
-    </div>
-  );
 }
 
 function ConnectionModal({
@@ -7009,33 +6897,6 @@ function ConnectionGroupModal({
   );
 }
 
-function ResultTable({ rows }: { rows: Record<string, unknown>[] }): ReactElement {
-  const columns = rows[0] ? Object.keys(rows[0]) : [];
-
-  return (
-    <div className="table-scroll">
-      <table className="data-grid compact">
-        <thead>
-          <tr>
-            {columns.map((column) => (
-              <th key={column}>{column}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={columns.map((column) => formatCell(row[column])).join("\u0000")}>
-              {columns.map((column) => (
-                <td key={column}>{formatCell(row[column])}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 function CopyRowSubmenu({
   disabled,
   selectedRowCount,
@@ -7413,26 +7274,6 @@ function parentStoragePrefix(prefix: string): string {
   const parts = prefix.replace(/\/+$/, "").split("/").filter(Boolean);
   parts.pop();
   return parts.length ? `${parts.join("/")}/` : "";
-}
-
-function formatStorageSize(value: number | null): string {
-  if (value === null) {
-    return "";
-  }
-
-  if (value < 1024) {
-    return `${value} B`;
-  }
-
-  const units = ["KB", "MB", "GB", "TB"];
-  let amount = value / 1024;
-  let unitIndex = 0;
-  while (amount >= 1024 && unitIndex < units.length - 1) {
-    amount /= 1024;
-    unitIndex += 1;
-  }
-
-  return `${amount >= 10 ? amount.toFixed(1) : amount.toFixed(2)} ${units[unitIndex]}`;
 }
 
 function rowKeyFor(primaryKeys: string[], row: Record<string, unknown>, index: number): string {

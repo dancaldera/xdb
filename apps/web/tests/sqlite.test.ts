@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { SqliteService } from "../src/main/database";
 import type { AppStore } from "../src/main/store";
 import type { ConnectionProfile, QueryHistoryItem } from "../src/shared/types";
@@ -78,13 +78,8 @@ describe("SQLite adapter", () => {
 
     let data = await service.getTableData("sqlite-profile", "main", "users", 1, 100);
     expect(data.rows).toEqual([{ id: 1, name: "Ada", email: "ada@example.com" }]);
-    expect(store.history[0]).toMatchObject({
-      source: "table-data",
-      target: { schema: "main", table: "users", action: "select" },
-      command: "SELECT",
-      rowCount: 1
-    });
-    expect(store.history[0]?.sql).toBe('select * from "main"."users" limit 100 offset 0');
+    // Browsing table data no longer writes history entries; the latest entry is the row edit.
+    expect(store.history[0]).toMatchObject({ source: "row-edit", command: "INSERT" });
 
     await service.updateRow({
       profileId: "sqlite-profile",
@@ -103,9 +98,7 @@ describe("SQLite adapter", () => {
       rules: [{ id: "1", enabled: true, column: "name", operator: "contains", value: "gra" }]
     });
     expect(data.rows).toEqual([{ id: 1, name: "Grace", email: "ada@example.com" }]);
-    expect(store.history[0]?.sql).toBe(
-      'select * from "main"."users" where lower(cast("name" as text)) like lower(\'%gra%\') escape \'\\\' limit 100 offset 0'
-    );
+    expect(store.history[0]).toMatchObject({ source: "row-edit", command: "UPDATE" });
 
     const result = await service.executeQuery("sqlite-profile", "select name from users where id = 1");
     expect(result.rows).toEqual([{ name: "Grace" }]);
@@ -129,11 +122,8 @@ describe("SQLite adapter", () => {
     });
     data = await service.getTableData("sqlite-profile", "main", "users", 1, 100);
     expect(data.rows).toEqual([]);
-    expect(store.history[0]).toMatchObject({
-      source: "table-data",
-      target: { schema: "main", table: "users", action: "select" },
-      rowCount: 0
-    });
-    expect(store.history.length).toBeGreaterThanOrEqual(7);
+    expect(store.history[0]).toMatchObject({ source: "row-edit", command: "DELETE" });
+    expect(store.history.some((item) => item.source === "table-data")).toBe(false);
+    expect(store.history.length).toBeGreaterThanOrEqual(5);
   });
 });
